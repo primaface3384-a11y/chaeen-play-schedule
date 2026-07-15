@@ -230,6 +230,13 @@
   .type-row input:focus{ outline:none; border-bottom-color: var(--lavender); }
   .type-row .del{ border:none; background:none; color: var(--ink-soft); font-size:16px; cursor:pointer; padding:4px 6px; }
   .type-row .del:hover{ color: var(--coral); }
+  .type-row .reorder{ display:flex; flex-direction:column; gap:1px; }
+  .type-row .reorder button{
+    border:none; background:none; color: var(--ink-soft); font-size:12px; line-height:1;
+    cursor:pointer; padding:3px 5px; border-radius:6px;
+  }
+  .type-row .reorder button:hover{ color: var(--ink); background: var(--paper); }
+  .type-row .reorder button:disabled{ color: var(--line); cursor:not-allowed; background:none; }
 
   .new-type-row{ display:flex; gap:8px; background: var(--bg); border-radius:12px; padding:10px; }
   .new-type-row input{
@@ -425,7 +432,7 @@ if(configured){
 }
 
 let data = {};   // { 'YYYY-MM-DD': [{id, type, minutes, memo}] }
-let types = DEFAULT_TYPES.map((name,i)=>({ name, color: PALETTE[i % PALETTE.length] })); // [{name, color}], ordered
+let types = DEFAULT_TYPES.map((name,i)=>({ name, color: PALETTE[i % PALETTE.length], sortOrder: i })); // [{name, color, sortOrder}], ordered
 let current = new Date();
 let selectedDate = null;
 let selectedType = null;
@@ -527,8 +534,8 @@ async function fetchAll(){
     newData[d].push({ id: row.id, type: row.type, minutes: row.minutes, memo: row.memo || '' });
   });
   const newTypes = (typesRes.data && typesRes.data.length)
-    ? typesRes.data.map(r=>({ name: r.name, color: r.color }))
-    : DEFAULT_TYPES.map((name,i)=>({ name, color: PALETTE[i % PALETTE.length] }));
+    ? typesRes.data.map(r=>({ name: r.name, color: r.color, sortOrder: r.sort_order }))
+    : DEFAULT_TYPES.map((name,i)=>({ name, color: PALETTE[i % PALETTE.length], sortOrder: i }));
 
   // Self-heal any legacy rows saved before the color column existed: assign
   // an unused color once and persist it, instead of recomputing by index
@@ -581,10 +588,18 @@ async function updateEntryRow(id, minutes, memo){
   const { error } = await sb.from('play_entries').update({ minutes, memo: memo || null }).eq('id', id);
   if(error) throw error;
 }
-async function ensureType(name, color){
-  const nextOrder = types.length;
+// Next order goes after the highest sort_order currently in use, not
+// types.length — after a delete, length can collide with a remaining type's
+// existing sort_order (e.g. types at [0,1,2], delete the one at 1, length is
+// now 2, which is still taken).
+function nextSortOrder(){
+  if(!types.length) return 0;
+  return Math.max(...types.map(t=> typeof t.sortOrder === 'number' ? t.sortOrder : 0)) + 1;
+}
+
+async function ensureType(name, color, sortOrder){
   const { error } = await sb.from('play_types').upsert(
-    { name, sort_order: nextOrder, color },
+    { name, sort_order: sortOrder, color },
     { onConflict: 'name', ignoreDuplicates: true }
   );
   if(error) throw error;
@@ -598,10 +613,11 @@ async function ensureType(name, color){
 async function addNewType(name){
   const usedColors = new Set(types.map(t=>t.color).filter(Boolean));
   let color = pickUnusedColor(usedColors);
+  const sortOrder = nextSortOrder();
   for(let attempt=0; attempt<8; attempt++){
     try{
-      await ensureType(name, color);
-      return color;
+      await ensureType(name, color, sortOrder);
+      return { color, sortOrder };
     }catch(e){
       if(e && e.code === '23505'){
         usedColors.add(color);
@@ -612,6 +628,28 @@ async function addNewType(name){
     }
   }
   throw new Error('겹치지 않는 색상을 찾지 못했어요. 잠시 후 다시 시도해주세요.');
+}
+
+// Renumbers every type's sort_order to 0..N-1 in the given name order. Used
+// for reordering so sort_order stays a clean, collision-free sequence.
+async function persistTypeOrder(orderedNames){
+  const results = await Promise.all(
+    orderedNames.map((name, i)=> sb.from('play_types').update({ sort_order: i }).eq('name', name))
+  );
+  const failed = results.find(r=>r.error);
+  if(failed) throw failed.error;
+}
+
+async function moveTypeOrder(name, direction){
+  const idx = types.findIndex(t=>t.name===name);
+  if(idx === -1) return;
+  const targetIdx = idx + direction;
+  if(targetIdx < 0 || targetIdx >= types.length) return;
+  const orderedNames = types.map(t=>t.name);
+  [orderedNames[idx], orderedNames[targetIdx]] = [orderedNames[targetIdx], orderedNames[idx]];
+  await persistTypeOrder(orderedNames);
+  await refreshAndRender();
+  renderTypesEditor();
 }
 async function renameTypeRow(oldName, newName){
   const { error: e1 } = await sb.from('play_types').update({ name: newName }).eq('name', oldName);
@@ -881,8 +919,8 @@ document.getElementById('addBtn').addEventListener('click', async ()=>{
   addBtn.textContent = '추가하는 중...';
   try{
     if(!types.find(t=>t.name===type)){
-      const color = await addNewType(type);
-      types.push({ name: type, color });
+      const { color, sortOrder } = await addNewType(type);
+      types.push({ name: type, color, sortOrder });
     }
     const memo = memoInput.value.trim();
     await insertEntry(selectedDate, type, duration, memo);
@@ -931,15 +969,46 @@ document.getElementById('todayBtn').addEventListener('click', ()=>{
 
 function renderTypesEditor(){
   typesEditorList.innerHTML = '';
-  types.forEach((t)=>{
+  types.forEach((t, i)=>{
     const row = document.createElement('div');
     row.className = 'type-row';
     row.innerHTML = `
+      <div class="reorder">
+        <button class="move-up" data-name="${escapeHtml(t.name)}" title="위로" ${i===0 ? 'disabled' : ''}>▲</button>
+        <button class="move-down" data-name="${escapeHtml(t.name)}" title="아래로" ${i===types.length-1 ? 'disabled' : ''}>▼</button>
+      </div>
       <div class="chip-dot" style="background:${t.color}"></div>
       <input type="text" value="${escapeHtml(t.name)}" data-name="${escapeHtml(t.name)}">
       <button class="del" data-name="${escapeHtml(t.name)}" title="삭제">✕</button>
     `;
     typesEditorList.appendChild(row);
+  });
+
+  typesEditorList.querySelectorAll('.move-up').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const name = btn.getAttribute('data-name');
+      typesEditorList.querySelectorAll('.move-up, .move-down').forEach(b=>b.disabled = true);
+      try{
+        await moveTypeOrder(name, -1);
+      }catch(e){
+        console.error('순서 변경 오류', e);
+        alert('순서 변경에 실패했어요.');
+        renderTypesEditor();
+      }
+    });
+  });
+  typesEditorList.querySelectorAll('.move-down').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const name = btn.getAttribute('data-name');
+      typesEditorList.querySelectorAll('.move-up, .move-down').forEach(b=>b.disabled = true);
+      try{
+        await moveTypeOrder(name, 1);
+      }catch(e){
+        console.error('순서 변경 오류', e);
+        alert('순서 변경에 실패했어요.');
+        renderTypesEditor();
+      }
+    });
   });
 
   typesEditorList.querySelectorAll('input').forEach(input=>{
