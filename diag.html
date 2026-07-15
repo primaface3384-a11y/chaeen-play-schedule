@@ -64,7 +64,24 @@ function runClientTest(){
   });
 }
 
-setTimeout(()=>{ log('⏰ 10초 경과 — 위에 3), 5), 7), 9)번 결과가 안 찍혔다면 그 단계에서 멈춘 것'); }, 10000);
+log('⏳ 10) 지금 서버가 실제로 서빙 중인 index.html 내용 확인...');
+fetch('./index.html?bust=' + Date.now(), { cache: 'no-store' }).then(async res=>{
+  const text = await res.text();
+  const hasTimeoutFix = text.includes('withTimeout');
+  const hasClientErrorFix = text.includes('clientInitError');
+  log('✅ 11) index.html 응답 도착 — status: ' + res.status + ', 길이: ' + text.length + ' bytes');
+  log('   최신 코드(withTimeout) 포함 여부: ' + hasTimeoutFix);
+  log('   최신 코드(clientInitError) 포함 여부: ' + hasClientErrorFix);
+  if(!hasTimeoutFix || !hasClientErrorFix){
+    log('   ⚠️ 옛날 버전이 캐시되어 서빙되고 있음 (CDN 캐시 문제)');
+  }else{
+    log('   ✅ 최신 버전이 정상 서빙되고 있음 (캐시 문제 아님)');
+  }
+}).catch(err=>{
+  log('❌ 11) index.html fetch 에러: ' + (err && err.message ? err.message : String(err)));
+});
+
+setTimeout(()=>{ log('⏰ 10초 경과 — 위에 3), 5), 7), 9), 11)번 결과가 안 찍혔다면 그 단계에서 멈춘 것'); }, 10000);
 </script>
 </body>
 </html>
