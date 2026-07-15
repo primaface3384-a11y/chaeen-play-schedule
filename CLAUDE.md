@@ -4,9 +4,26 @@
 
 ## 구성
 - `index.html` — 실제 앱 전체 (순수 HTML/CSS/JS + Supabase JS 클라이언트, 빌드 과정 없음)
-- `schema.sql` — Supabase(Postgres)에 실행하는 테이블/RLS/Realtime 설정 스크립트
+- `schema.sql` — Supabase(Postgres)에 실행하는 테이블/RLS/Realtime/백업트리거 설정 스크립트
 - `diag.html` — Supabase 연결 문제 생겼을 때 쓰는 진단 페이지 (아래 "디버깅 노하우" 참고). 필요할 때까지 유지.
 - 배포: GitHub Pages (`main` 브랜치 root)에서 정적 호스팅. 별도 빌드/배포 파이프라인 없음 — `main`에 머지되면 자동 배포됨.
+
+## 🛡️ DB 안전 수칙 (절대 지킬 것)
+
+이 앱의 데이터(`play_entries`, `play_types`)는 가족의 실제 추억 기록이라 **되돌릴 수 없는 손실이 생기면 안 됩니다.** 앞으로 이 코드를 수정할 때(Claude든 사람이든) 반드시 지켜야 할 규칙:
+
+1. **`schema.sql`이나 새 마이그레이션에 `DROP TABLE`, `TRUNCATE`, 조건 없는 `DELETE FROM`을 절대 넣지 않는다.** 스키마를 바꿔야 하면 항상 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 같은 **추가형(additive)** 변경만 사용한다. 컬럼을 지워야 할 것 같으면, 지우지 말고 그냥 안 쓰는 채로 둔다.
+2. **테이블 삭제(delete)는 이미 자동으로 백업된다.** `play_entries`/`play_types`에서 행이 삭제되면 `before delete` 트리거가 자동으로 `play_entries_deleted`/`play_types_deleted` 테이블에 복사해둔다 (RLS로 anon key 접근은 막혀 있고, Supabase SQL Editor에서만 조회 가능). 실수로 뭔가 지워졌으면:
+   ```sql
+   select * from play_entries_deleted order by deleted_at desc;
+   -- 복구:
+   insert into play_entries (id, entry_date, type, minutes, created_at)
+     select id, entry_date, type, minutes, created_at from play_entries_deleted where id = '복구할-id';
+   ```
+   새로운 테이블을 추가한다면, 그 테이블에도 같은 패턴(삭제 전 보관함 테이블 + 트리거)을 만들어줄 것.
+3. **위험한 SQL을 Supabase SQL Editor에서 실행하기 전에는 항상 앱의 "💾 데이터 백업" 버튼으로 먼저 JSON을 내려받아 둔다.** (또는 SQL Editor에서 `select * from play_entries;` / `select * from play_types;` 결과를 CSV로 export.)
+4. **Supabase 무료 플랜은 프로젝트가 일정 기간(보통 1주일) 동안 전혀 접속이 없으면 자동으로 일시정지(pause)될 수 있다.** 일시정지된 프로젝트는 Supabase 대시보드에서 재활성화(restore)하면 데이터는 그대로 남아있지만, 오래 방치하면(수개월) 완전 삭제될 수 있으니 앱을 가끔이라도(한 달에 한 번 이상) 열어주는 게 안전하다.
+5. RLS 정책은 지금 "anon key만 알면 읽기/쓰기/삭제 다 가능" 구조다. 새 기능을 추가하다가 실수로 `for delete using (true)` 같은 정책을 다른 테이블에도 무심코 복붙하지 않도록 주의 — 꼭 필요한 테이블에만 명시적으로 걸 것.
 
 ## ⚠️ 중요: `supabase`라는 변수명을 쓰지 말 것
 

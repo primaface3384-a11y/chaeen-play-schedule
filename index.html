@@ -247,6 +247,7 @@
   <div class="legend" id="legend"></div>
   <div style="text-align:center; margin-top:10px;">
     <button class="edit-types-link" id="editTypesBtn">🖍️ 놀이 종류 편집</button>
+    <button class="edit-types-link" id="exportBtn">💾 데이터 백업</button>
   </div>
 </div>
 
@@ -745,6 +746,43 @@ document.getElementById('closeTypesBtn').addEventListener('click', ()=>{
   typesOverlay.classList.remove('open');
 });
 typesOverlay.addEventListener('click', (e)=>{ if(e.target===typesOverlay){ typesOverlay.classList.remove('open'); } });
+
+document.getElementById('exportBtn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('exportBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '백업 만드는 중...';
+  try{
+    const [entriesRes, typesRes] = await Promise.all([
+      sb.from('play_entries').select('*').order('entry_date', { ascending: true }),
+      sb.from('play_types').select('*').order('sort_order', { ascending: true })
+    ]);
+    if(entriesRes.error) throw entriesRes.error;
+    if(typesRes.error) throw typesRes.error;
+
+    const backup = {
+      exported_at: new Date().toISOString(),
+      play_entries: entriesRes.data || [],
+      play_types: typesRes.data || []
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dateStr = fmtDate(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+    a.href = url;
+    a.download = `chaeen-scheduler-backup-${dateStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){
+    console.error('백업 오류', e);
+    alert('백업에 실패했어요. 인터넷 연결을 확인해주세요.');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+});
 
 // ---------- Init + realtime subscriptions ----------
 async function init(){
