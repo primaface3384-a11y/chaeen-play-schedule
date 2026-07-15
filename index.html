@@ -259,11 +259,28 @@
   .stats-summary-nums span{ font-size:11px; color: var(--ink-soft); }
 
   .stats-list{ display:flex; flex-direction:column; gap:12px; }
+  .stats-row{ cursor:pointer; border-radius:10px; padding:6px; margin:-6px; transition: background .12s ease; }
+  .stats-row:hover{ background: var(--bg); }
   .stats-row-head{ display:flex; align-items:center; gap:8px; margin-bottom:5px; }
   .stats-row-name{ font-size:13px; font-weight:600; flex:1; }
   .stats-row-nums{ font-size:12px; color: var(--ink-soft); }
+  .stats-row-arrow{ font-size:12px; color: var(--ink-soft); }
   .stats-bar-track{ height:8px; border-radius:99px; background: var(--line); overflow:hidden; }
   .stats-bar-fill{ height:100%; border-radius:99px; }
+
+  .stats-back{
+    border:none; background:none; color: var(--ink-soft); font-size:12px; cursor:pointer;
+    font-family:'Gowun Dodum',sans-serif; padding:0; margin-bottom:8px; text-decoration:underline;
+  }
+  .stats-back:hover{ color: var(--ink); }
+  .stats-detail-row{
+    display:flex; align-items:flex-start; gap:12px; background: var(--bg);
+    border-radius:12px; padding:10px 12px;
+  }
+  .stats-detail-date{ font-size:13px; font-weight:600; color: var(--ink); width:56px; flex-shrink:0; }
+  .stats-detail-info{ flex:1; }
+  .stats-detail-mins{ font-size:12px; color: var(--ink-soft); }
+  .stats-detail-memo{ font-size:12px; color: var(--ink-soft); margin-top:3px; white-space:pre-wrap; line-height:1.4; }
 
   .setup-banner{
     background:#FFF3E0; border:1.5px solid var(--yellow); border-radius:14px;
@@ -414,6 +431,7 @@ let selectedDate = null;
 let selectedType = null;
 let duration = 30;
 let statsScope = 'month'; // 'month' | 'all'
+let statsSelectedType = null;
 let editingEntryId = null;
 let editDuration = 30;
 
@@ -1059,7 +1077,24 @@ function computeStats(scope){
   return { perType, totalCount, totalMinutes, activeDays: activeDates.size };
 }
 
-function renderStats(){
+// All entries of one play type within the given scope, sorted chronologically.
+function computeEntriesForType(typeName, scope){
+  const y = current.getFullYear(), m = current.getMonth();
+  const rows = [];
+  Object.keys(data).forEach(dateStr=>{
+    if(scope === 'month'){
+      const [dy, dm] = dateStr.split('-').map(Number);
+      if(dy !== y || dm !== m + 1) return;
+    }
+    (data[dateStr] || []).forEach(e=>{
+      if(e.type === typeName) rows.push(Object.assign({ dateStr }, e));
+    });
+  });
+  rows.sort((a,b)=> a.dateStr < b.dateStr ? -1 : a.dateStr > b.dateStr ? 1 : 0);
+  return rows;
+}
+
+function renderStatsList(){
   const stats = computeStats(statsScope);
   const h = Math.floor(stats.totalMinutes / 60), mm = stats.totalMinutes % 60;
   const label = statsScope === 'month' ? `${current.getFullYear()}년 ${current.getMonth() + 1}월` : '전체 기간';
@@ -1091,14 +1126,69 @@ function renderStats(){
         <span class="chip-dot" style="background:${color}"></span>
         <span class="stats-row-name">${escapeHtml(name)}</span>
         <span class="stats-row-nums">${s.count}회 · ${s.minutes}분 (${pct}%)</span>
+        <span class="stats-row-arrow">›</span>
       </div>
       <div class="stats-bar-track"><div class="stats-bar-fill" style="width:${barPct}%; background:${color}"></div></div>
+    `;
+    row.addEventListener('click', ()=>{
+      statsSelectedType = name;
+      renderStats();
+    });
+    statsList.appendChild(row);
+  });
+}
+
+function renderStatsDetail(typeName){
+  const rows = computeEntriesForType(typeName, statsScope);
+  const color = colorForType(typeName);
+  const totalMinutes = rows.reduce((s,r)=>s+r.minutes, 0);
+  const h = Math.floor(totalMinutes / 60), mm = totalMinutes % 60;
+
+  statsSummary.innerHTML = `
+    <button class="stats-back" id="statsBackBtn">← 목록으로</button>
+    <div class="stats-summary-title">
+      <span class="chip-dot" style="background:${color}; display:inline-block; vertical-align:middle; margin-right:6px;"></span>${escapeHtml(typeName)}
+    </div>
+    <div class="stats-summary-nums">
+      <div><strong>${rows.length}</strong><span>놀이 횟수</span></div>
+      <div><strong>${h > 0 ? h + '시간 ' : ''}${mm}분</strong><span>총 시간</span></div>
+    </div>
+  `;
+  document.getElementById('statsBackBtn').addEventListener('click', ()=>{
+    statsSelectedType = null;
+    renderStats();
+  });
+
+  statsList.innerHTML = '';
+  if(!rows.length){
+    statsList.innerHTML = '<div class="empty-note">기록이 없어요.</div>';
+    return;
+  }
+  rows.forEach(r=>{
+    const [ry, rm, rd] = r.dateStr.split('-').map(Number);
+    const row = document.createElement('div');
+    row.className = 'stats-detail-row';
+    row.innerHTML = `
+      <div class="stats-detail-date">${rm}월 ${rd}일</div>
+      <div class="stats-detail-info">
+        <div class="stats-detail-mins">${r.minutes}분</div>
+        ${r.memo ? `<div class="stats-detail-memo">📝 ${escapeHtml(r.memo)}</div>` : ''}
+      </div>
     `;
     statsList.appendChild(row);
   });
 }
 
+function renderStats(){
+  if(statsSelectedType){
+    renderStatsDetail(statsSelectedType);
+  }else{
+    renderStatsList();
+  }
+}
+
 document.getElementById('statsBtn').addEventListener('click', ()=>{
+  statsSelectedType = null;
   renderStats();
   statsOverlay.classList.add('open');
 });
