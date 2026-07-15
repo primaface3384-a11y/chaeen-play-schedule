@@ -221,6 +221,7 @@
     <p>오늘은 무슨 놀이를 했을까? 🧸</p>
   </header>
   <div class="sync-status"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">연결 중...</span></div>
+  <div id="debugLog" style="font-family:monospace; font-size:10px; color:#999; white-space:pre-wrap; word-break:break-all; text-align:left; max-height:160px; overflow-y:auto; border:1px solid #eee; border-radius:8px; padding:6px; margin-bottom:10px;"></div>
 
   <div id="setupBanner" class="setup-banner" style="display:none;">
     ⚠️ 아직 Supabase 연결 정보가 설정되지 않았어요.<br>
@@ -297,6 +298,15 @@
 </div>
 
 <script>
+function dlog(msg){
+  const el = document.getElementById('debugLog');
+  if(el) el.textContent += (el.textContent ? '\n' : '') + new Date().toISOString().slice(11,23) + ' ' + msg;
+  console.log('[dlog]', msg);
+}
+window.addEventListener('error', (e)=> dlog('❌ 전역 에러: ' + e.message + ' (' + e.filename + ':' + e.lineno + ')'));
+window.addEventListener('unhandledrejection', (e)=> dlog('❌ unhandled rejection: ' + (e.reason && e.reason.message ? e.reason.message : JSON.stringify(e.reason))));
+dlog('스크립트 시작');
+
 // ============================================================
 // ⚙️ 설정: Supabase 프로젝트 URL과 anon key를 여기에 넣어주세요.
 // (Supabase 대시보드 → Project Settings → API 에서 확인)
@@ -311,12 +321,15 @@ const PALETTE = ['#FF8A70','#FFC94A','#4FB0E8','#6BC79E','#B18FE0','#F786B0','#F
 let supabase = null;
 let clientInitError = null;
 let configured = SUPABASE_URL !== 'YOUR_SUPABASE_URL' && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
+dlog('configured = ' + configured + ', window.supabase 타입 = ' + typeof window.supabase);
 if(configured){
   try{
     if(!window.supabase) throw new Error('Supabase 라이브러리 로드 실패 (CDN 차단/네트워크 문제일 수 있음)');
     supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    dlog('createClient() 성공');
   }catch(e){
     clientInitError = e.message || String(e);
+    dlog('❌ createClient() 예외: ' + clientInitError);
     console.error('Supabase 클라이언트 생성 오류', e);
   }
 }
@@ -371,10 +384,12 @@ function colorForType(type){
 
 // ---------- Supabase data access ----------
 async function fetchAll(){
+  dlog('fetchAll() 시작');
   const [entriesRes, typesRes] = await withTimeout(Promise.all([
     supabase.from('play_entries').select('*').order('entry_date', { ascending: true }),
     supabase.from('play_types').select('*').order('sort_order', { ascending: true })
   ]), 10000, 'Supabase');
+  dlog('fetchAll() Promise.all 완료 — entriesRes.error=' + JSON.stringify(entriesRes.error) + ', typesRes.error=' + JSON.stringify(typesRes.error));
   if(entriesRes.error) throw entriesRes.error;
   if(typesRes.error) throw typesRes.error;
 
@@ -393,14 +408,19 @@ async function fetchAll(){
 }
 
 async function refreshAndRender(){
+  dlog('refreshAndRender() 시작');
   try{
     await fetchAll();
+    dlog('fetchAll() 성공, status=on');
     setSyncStatus('on');
   }catch(e){
+    dlog('❌ refreshAndRender catch: ' + (e && e.message ? e.message : String(e)));
     console.error('불러오기 오류', e);
     setSyncStatus('off', e.message || String(e));
   }
+  dlog('renderCalendar() 호출 직전');
   renderCalendar();
+  dlog('renderCalendar() 완료');
   if(overlay.classList.contains('open') && selectedDate){
     renderEntries();
   }
@@ -748,19 +768,24 @@ typesOverlay.addEventListener('click', (e)=>{ if(e.target===typesOverlay){ types
 
 // ---------- Init + realtime subscriptions ----------
 async function init(){
+  dlog('init() 시작');
   if(!configured){
+    dlog('configured=false, setupBanner 표시하고 종료');
     document.getElementById('setupBanner').style.display = 'block';
     setSyncStatus('off');
     renderCalendar();
     return;
   }
   if(clientInitError){
+    dlog('clientInitError 있음, 종료: ' + clientInitError);
     setSyncStatus('off', clientInitError);
     renderCalendar();
     return;
   }
   setSyncStatus('busy');
+  dlog('refreshAndRender() 호출 직전');
   await refreshAndRender();
+  dlog('refreshAndRender() await 완료, realtime 채널 구독 시작');
 
   supabase
     .channel('play_entries_changes')
@@ -771,8 +796,11 @@ async function init(){
     .channel('play_types_changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'play_types' }, ()=> refreshAndRender())
     .subscribe();
+  dlog('init() 완료');
 }
+dlog('init() 호출 직전');
 init().catch(e=>{
+  dlog('❌ init().catch: ' + (e && e.message ? e.message : String(e)));
   console.error('초기화 오류', e);
   setSyncStatus('off', e.message || String(e));
   renderCalendar();
