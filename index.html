@@ -318,14 +318,14 @@ const SUPABASE_ANON_KEY = 'sb_publishable_w5GFr-IgQzZ8WAChw5Atbg_BanhsY13';
 const DEFAULT_TYPES = ['블록놀이','그림그리기','책읽기','소꿉놀이','야외놀이','노래율동','퍼즐','물놀이'];
 const PALETTE = ['#FF8A70','#FFC94A','#4FB0E8','#6BC79E','#B18FE0','#F786B0','#F2A65A','#7FC8C4'];
 
-let supabase = null;
+let sb = null;
 let clientInitError = null;
 let configured = SUPABASE_URL !== 'YOUR_SUPABASE_URL' && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
 dlog('configured = ' + configured + ', window.supabase 타입 = ' + typeof window.supabase);
 if(configured){
   try{
     if(!window.supabase) throw new Error('Supabase 라이브러리 로드 실패 (CDN 차단/네트워크 문제일 수 있음)');
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     dlog('createClient() 성공');
   }catch(e){
     clientInitError = e.message || String(e);
@@ -386,8 +386,8 @@ function colorForType(type){
 async function fetchAll(){
   dlog('fetchAll() 시작');
   const [entriesRes, typesRes] = await withTimeout(Promise.all([
-    supabase.from('play_entries').select('*').order('entry_date', { ascending: true }),
-    supabase.from('play_types').select('*').order('sort_order', { ascending: true })
+    sb.from('play_entries').select('*').order('entry_date', { ascending: true }),
+    sb.from('play_types').select('*').order('sort_order', { ascending: true })
   ]), 10000, 'Supabase');
   dlog('fetchAll() Promise.all 완료 — entriesRes.error=' + JSON.stringify(entriesRes.error) + ', typesRes.error=' + JSON.stringify(typesRes.error));
   if(entriesRes.error) throw entriesRes.error;
@@ -430,29 +430,29 @@ async function refreshAndRender(){
 }
 
 async function insertEntry(dateStr, type, minutes){
-  const { error } = await supabase.from('play_entries').insert({ entry_date: dateStr, type, minutes });
+  const { error } = await sb.from('play_entries').insert({ entry_date: dateStr, type, minutes });
   if(error) throw error;
 }
 async function deleteEntryRow(id){
-  const { error } = await supabase.from('play_entries').delete().eq('id', id);
+  const { error } = await sb.from('play_entries').delete().eq('id', id);
   if(error) throw error;
 }
 async function ensureType(name){
   const nextOrder = types.length;
-  const { error } = await supabase.from('play_types').upsert(
+  const { error } = await sb.from('play_types').upsert(
     { name, sort_order: nextOrder },
     { onConflict: 'name', ignoreDuplicates: true }
   );
   if(error) throw error;
 }
 async function renameTypeRow(oldName, newName){
-  const { error: e1 } = await supabase.from('play_types').update({ name: newName }).eq('name', oldName);
+  const { error: e1 } = await sb.from('play_types').update({ name: newName }).eq('name', oldName);
   if(e1) throw e1;
-  const { error: e2 } = await supabase.from('play_entries').update({ type: newName }).eq('type', oldName);
+  const { error: e2 } = await sb.from('play_entries').update({ type: newName }).eq('type', oldName);
   if(e2) throw e2;
 }
 async function deleteTypeRow(name){
-  const { error } = await supabase.from('play_types').delete().eq('name', name);
+  const { error } = await sb.from('play_types').delete().eq('name', name);
   if(error) throw error;
 }
 
@@ -787,12 +787,12 @@ async function init(){
   await refreshAndRender();
   dlog('refreshAndRender() await 완료, realtime 채널 구독 시작');
 
-  supabase
+  sb
     .channel('play_entries_changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'play_entries' }, ()=> refreshAndRender())
     .subscribe();
 
-  supabase
+  sb
     .channel('play_types_changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'play_types' }, ()=> refreshAndRender())
     .subscribe();
