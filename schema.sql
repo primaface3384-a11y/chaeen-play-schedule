@@ -140,6 +140,10 @@ where color is null;
 alter table play_types_deleted add column if not exists color text;
 alter table play_entries_deleted add column if not exists memo text;
 
+-- security definer: 보관함 테이블은 anon 키로 직접 select/insert가 막혀 있는데(RLS,
+-- 정책 없음), 트리거 함수가 일반 권한(호출자 권한)으로 실행되면 자기 자신도 그 테이블에
+-- 못 쓰는 모순이 생겨서 delete 자체가 실패합니다. security definer로 만들어서
+-- "함수를 만든 소유자(관리자) 권한"으로 실행되게 하여 이 문제를 해결합니다.
 create or replace function archive_deleted_play_entry()
 returns trigger as $$
 begin
@@ -147,7 +151,7 @@ begin
   values (old.id, old.entry_date, old.type, old.minutes, old.memo, old.created_at);
   return old;
 end;
-$$ language plpgsql;
+$$ language plpgsql security definer set search_path = public;
 
 create or replace function archive_deleted_play_type()
 returns trigger as $$
@@ -156,4 +160,19 @@ begin
   values (old.id, old.name, old.sort_order, old.color, old.created_at);
   return old;
 end;
-$$ language plpgsql;
+$$ language plpgsql security definer set search_path = public;
+
+-- unique index를 걸기 전에, 이미 같은 색으로 저장된 놀이 종류가 있으면
+-- (앱의 예전 버그로 생겼을 수 있음) 하나만 남기고 나머지는 색을 비워둡니다.
+-- 비워진 색은 앱을 다음에 열 때 자동으로 안 겹치는 새 색으로 채워집니다.
+with ranked as (
+  select id, color, row_number() over (partition by color order by created_at asc) as rn
+  from play_types
+  where color is not null
+)
+update play_types
+set color = null
+where id in (select id from ranked where rn > 1);
+
+-- 놀이 종류 색상은 이제 DB 차원에서 절대 겹치지 않도록 unique index로 강제합니다.
+create unique index if not exists play_types_color_key on play_types (color) where color is not null;

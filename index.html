@@ -537,6 +537,30 @@ async function ensureType(name, color){
   );
   if(error) throw error;
 }
+
+// Adds a brand-new play type with a color guaranteed not to collide with any
+// other type — the DB has a unique index on play_types.color, so if our
+// locally-picked color turns out to already be taken (e.g. another client
+// grabbed it first), Postgres rejects the insert and we just retry with a
+// different one instead of silently keeping a duplicate.
+async function addNewType(name){
+  const usedColors = new Set(types.map(t=>t.color).filter(Boolean));
+  let color = pickUnusedColor(usedColors);
+  for(let attempt=0; attempt<8; attempt++){
+    try{
+      await ensureType(name, color);
+      return color;
+    }catch(e){
+      if(e && e.code === '23505'){
+        usedColors.add(color);
+        color = pickUnusedColor(usedColors);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error('겹치지 않는 색상을 찾지 못했어요. 잠시 후 다시 시도해주세요.');
+}
 async function renameTypeRow(oldName, newName){
   const { error: e1 } = await sb.from('play_types').update({ name: newName }).eq('name', oldName);
   if(e1) throw e1;
@@ -735,8 +759,7 @@ document.getElementById('addBtn').addEventListener('click', async ()=>{
   addBtn.textContent = '추가하는 중...';
   try{
     if(!types.find(t=>t.name===type)){
-      const color = pickUnusedColor();
-      await ensureType(type, color);
+      const color = await addNewType(type);
       types.push({ name: type, color });
     }
     const memo = memoInput.value.trim();
@@ -847,7 +870,7 @@ newTypeBtn.addEventListener('click', async ()=>{
   if(!name || types.find(t=>t.name===name)) return;
   newTypeBtn.disabled = true;
   try{
-    await ensureType(name, pickUnusedColor());
+    await addNewType(name);
     newTypeInput.value = '';
     await refreshAndRender();
     renderTypesEditor();
