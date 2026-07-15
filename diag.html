@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>진단 페이지</title>
+</head>
+<body style="font-family: -apple-system, monospace; padding:16px; white-space:pre-wrap; word-break:break-all; font-size:14px; line-height:1.6;">
+<div id="out">페이지 로드됨. 스크립트 시작 전...</div>
+<script>
+const out = document.getElementById('out');
+function log(msg){
+  out.textContent += '\n' + msg;
+  console.log(msg);
+}
+log('실행 시각: ' + new Date().toISOString());
+log('✅ 1) 인라인 스크립트 실행됨');
+
+const SUPABASE_URL = 'https://demwtdbnbhkjfztudqjo.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_w5GFr-IgQzZ8WAChw5Atbg_BanhsY13';
+
+log('⏳ 2) fetch()로 Supabase REST API 직접 호출 시도...');
+fetch(SUPABASE_URL + '/rest/v1/play_types?select=*', {
+  headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY }
+}).then(async res=>{
+  log('✅ 3) 응답 도착 — status: ' + res.status);
+  const text = await res.text();
+  log('   body: ' + text.slice(0, 500));
+}).catch(err=>{
+  log('❌ 3) fetch 에러: ' + (err && err.message ? err.message : String(err)));
+});
+
+log('⏳ 4) supabase-js CDN 스크립트 로드 시도...');
+const s = document.createElement('script');
+s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+s.onload = ()=> log('✅ 5) supabase-js 로드 성공 — window.supabase 타입: ' + (typeof window.supabase));
+s.onerror = ()=> log('❌ 5) supabase-js CDN 로드 실패 (네트워크/차단 문제)');
+document.body.appendChild(s);
+
+setTimeout(()=>{ log('⏰ 10초 경과 — 위에 3), 5)번 결과가 안 찍혔다면 그 단계에서 멈춘 것'); }, 10000);
+</script>
+</body>
+</html>
