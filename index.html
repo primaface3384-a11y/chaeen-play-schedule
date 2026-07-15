@@ -162,6 +162,15 @@
   .duration-value{ flex:1; text-align:center; font-family:'Gaegu',cursive; font-size:26px; }
   .duration-value span{ font-size:14px; font-family:'Gowun Dodum',sans-serif; color: var(--ink-soft); }
 
+  .memo-row{ margin-bottom:14px; }
+  .memo-row textarea{
+    width:100%; border:1.5px solid var(--line); border-radius:10px; padding:9px 12px;
+    font-size:14px; font-family:'Gowun Dodum',sans-serif; background: var(--paper); color: var(--ink);
+    resize: vertical; min-height:44px;
+  }
+  .memo-row textarea:focus{ outline:none; border-color: var(--lavender); }
+  .entry .memo{ font-size:12px; color: var(--ink-soft); margin-top:3px; white-space:pre-wrap; line-height:1.4; }
+
   .add-btn{
     width:100%; border:none; border-radius:12px; padding:12px; font-size:15px;
     background: var(--coral); color:#fff; cursor:pointer; font-family:'Gowun Dodum',sans-serif; font-weight:600;
@@ -207,6 +216,27 @@
   .new-type-row button:disabled{ background: var(--line); cursor:not-allowed; }
   .types-note{ font-size:12px; color: var(--ink-soft); margin: -6px 0 14px; line-height:1.5; }
 
+  .stats-toggle{ display:flex; gap:8px; margin-bottom:16px; }
+  .stats-tab{
+    flex:1; border:1.5px solid var(--line); background: var(--paper); color: var(--ink-soft);
+    border-radius: 10px; padding:9px; font-size:13px; cursor:pointer; font-family:'Gowun Dodum',sans-serif;
+  }
+  .stats-tab.selected{ border-color: var(--lavender); color: var(--ink); background:#F4EEFB; font-weight:600; }
+
+  .stats-summary{ background: var(--bg); border-radius:14px; padding:14px; margin-bottom:16px; }
+  .stats-summary-title{ font-family:'Gaegu',cursive; font-size:18px; margin-bottom:8px; }
+  .stats-summary-nums{ display:flex; justify-content:space-around; text-align:center; }
+  .stats-summary-nums div{ display:flex; flex-direction:column; gap:2px; }
+  .stats-summary-nums strong{ font-family:'Gaegu',cursive; font-size:20px; color: var(--ink); }
+  .stats-summary-nums span{ font-size:11px; color: var(--ink-soft); }
+
+  .stats-list{ display:flex; flex-direction:column; gap:12px; }
+  .stats-row-head{ display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+  .stats-row-name{ font-size:13px; font-weight:600; flex:1; }
+  .stats-row-nums{ font-size:12px; color: var(--ink-soft); }
+  .stats-bar-track{ height:8px; border-radius:99px; background: var(--line); overflow:hidden; }
+  .stats-bar-fill{ height:100%; border-radius:99px; }
+
   .setup-banner{
     background:#FFF3E0; border:1.5px solid var(--yellow); border-radius:14px;
     padding:14px; font-size:13px; line-height:1.6; margin-bottom:16px; color: var(--ink);
@@ -247,6 +277,7 @@
   <div class="legend" id="legend"></div>
   <div style="text-align:center; margin-top:10px;">
     <button class="edit-types-link" id="editTypesBtn">🖍️ 놀이 종류 편집</button>
+    <button class="edit-types-link" id="statsBtn">📊 통계</button>
     <button class="edit-types-link" id="exportBtn">💾 데이터 백업</button>
   </div>
 </div>
@@ -275,6 +306,11 @@
         <button id="plusBtn">+</button>
       </div>
 
+      <span class="label">메모 (선택)</span>
+      <div class="memo-row">
+        <textarea id="memoInput" rows="2" placeholder="예: 처음으로 혼자 완성했어요!"></textarea>
+      </div>
+
       <button class="add-btn" id="addBtn">놀이 추가하기</button>
     </div>
   </div>
@@ -297,6 +333,23 @@
   </div>
 </div>
 
+<div class="overlay" id="statsOverlay">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>📊 통계</h2>
+      <button class="close" id="closeStatsBtn">✕</button>
+    </div>
+
+    <div class="stats-toggle">
+      <button class="stats-tab selected" id="statsMonthBtn">이번 달</button>
+      <button class="stats-tab" id="statsAllBtn">전체 기간</button>
+    </div>
+
+    <div class="stats-summary" id="statsSummary"></div>
+    <div class="stats-list" id="statsList"></div>
+  </div>
+</div>
+
 <script>
 // ============================================================
 // ⚙️ 설정: Supabase 프로젝트 URL과 anon key를 여기에 넣어주세요.
@@ -307,7 +360,11 @@ const SUPABASE_ANON_KEY = 'sb_publishable_w5GFr-IgQzZ8WAChw5Atbg_BanhsY13';
 // ============================================================
 
 const DEFAULT_TYPES = ['블록놀이','그림그리기','책읽기','소꿉놀이','야외놀이','노래율동','퍼즐','물놀이'];
-const PALETTE = ['#FF8A70','#FFC94A','#4FB0E8','#6BC79E','#B18FE0','#F786B0','#F2A65A','#7FC8C4'];
+const PALETTE = [
+  '#FF8A70','#FFC94A','#4FB0E8','#6BC79E','#B18FE0','#F786B0','#F2A65A','#7FC8C4',
+  '#8FA6E0','#E0748F','#9BD46B','#D9A5F2','#5FD1B0','#F2D24A','#7594E8','#E88F5F',
+  '#63C2E0','#C48FE0','#8FE0A6','#E06B8F'
+];
 
 let sb = null;
 let clientInitError = null;
@@ -322,12 +379,13 @@ if(configured){
   }
 }
 
-let data = {};   // { 'YYYY-MM-DD': [{id, type, minutes}] }
-let types = [...DEFAULT_TYPES]; // ordered list of type names
+let data = {};   // { 'YYYY-MM-DD': [{id, type, minutes, memo}] }
+let types = DEFAULT_TYPES.map((name,i)=>({ name, color: PALETTE[i % PALETTE.length] })); // [{name, color}], ordered
 let current = new Date();
 let selectedDate = null;
 let selectedType = null;
 let duration = 30;
+let statsScope = 'month'; // 'month' | 'all'
 
 const grid = document.getElementById('grid');
 const monthLabel = document.getElementById('monthLabel');
@@ -338,11 +396,15 @@ const entryList = document.getElementById('entryList');
 const typeChipsEl = document.getElementById('typeChips');
 const customTypeInput = document.getElementById('customType');
 const durationVal = document.getElementById('durationVal');
+const memoInput = document.getElementById('memoInput');
 const legend = document.getElementById('legend');
 const typesOverlay = document.getElementById('typesOverlay');
 const typesEditorList = document.getElementById('typesEditorList');
 const newTypeInput = document.getElementById('newTypeInput');
 const newTypeBtn = document.getElementById('newTypeBtn');
+const statsOverlay = document.getElementById('statsOverlay');
+const statsSummary = document.getElementById('statsSummary');
+const statsList = document.getElementById('statsList');
 const syncDot = document.getElementById('syncDot');
 const syncLabel = document.getElementById('syncLabel');
 
@@ -360,14 +422,45 @@ function withTimeout(promise, ms, label){
   ]);
 }
 
-function colorForType(type){
-  let idx = types.indexOf(type);
-  if(idx === -1){
-    const allSeen = Array.from(new Set([...types, ...Object.values(data).flat().map(e=>e.type)]));
-    idx = allSeen.indexOf(type);
-    if(idx === -1) idx = 0;
+function hslToHex(h, s, l){
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = x => Math.round(255 * x).toString(16).padStart(2, '0');
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
+
+// Deterministic fallback color for a name that has no stored color
+// (e.g. an old entry whose type was later renamed or deleted).
+function colorFromHash(name){
+  let hash = 0;
+  for(let i=0;i<name.length;i++){ hash = (hash * 31 + name.charCodeAt(i)) % 360; }
+  return hslToHex(hash, 65, 60);
+}
+
+// Picks a color from PALETTE that isn't in use by any current type; once the
+// palette is exhausted, generates further colors spaced by the golden angle
+// so they stay visually distinct from each other and from the palette.
+function pickUnusedColor(usedColors){
+  const used = usedColors || new Set(types.map(t=>t.color).filter(Boolean));
+  const free = PALETTE.find(c=>!used.has(c));
+  if(free) return free;
+  let hue = (used.size * 137.508) % 360;
+  let color = hslToHex(hue, 65, 60);
+  let guard = 0;
+  while(used.has(color) && guard < 72){
+    hue = (hue + 137.508) % 360;
+    color = hslToHex(hue, 65, 60);
+    guard++;
   }
-  return PALETTE[idx % PALETTE.length];
+  return color;
+}
+
+function colorForType(type){
+  const t = types.find(x=>x.name===type);
+  if(t && t.color) return t.color;
+  return colorFromHash(type);
 }
 
 // ---------- Supabase data access ----------
@@ -383,11 +476,26 @@ async function fetchAll(){
   (entriesRes.data || []).forEach(row=>{
     const d = row.entry_date;
     if(!newData[d]) newData[d] = [];
-    newData[d].push({ id: row.id, type: row.type, minutes: row.minutes });
+    newData[d].push({ id: row.id, type: row.type, minutes: row.minutes, memo: row.memo || '' });
   });
   const newTypes = (typesRes.data && typesRes.data.length)
-    ? typesRes.data.map(r=>r.name)
-    : [...DEFAULT_TYPES];
+    ? typesRes.data.map(r=>({ name: r.name, color: r.color }))
+    : DEFAULT_TYPES.map((name,i)=>({ name, color: PALETTE[i % PALETTE.length] }));
+
+  // Self-heal any legacy rows saved before the color column existed: assign
+  // an unused color once and persist it, instead of recomputing by index
+  // every render (which is what caused colors to shift/collide before).
+  const usedColors = new Set(newTypes.map(t=>t.color).filter(Boolean));
+  newTypes.forEach(t=>{
+    if(!t.color){
+      const color = pickUnusedColor(usedColors);
+      t.color = color;
+      usedColors.add(color);
+      sb.from('play_types').update({ color }).eq('name', t.name).then(({error})=>{
+        if(error) console.error('색상 보정 실패', error);
+      });
+    }
+  });
 
   data = newData;
   types = newTypes;
@@ -408,20 +516,23 @@ async function refreshAndRender(){
   if(typesOverlay.classList.contains('open')){
     renderTypesEditor();
   }
+  if(statsOverlay.classList.contains('open')){
+    renderStats();
+  }
 }
 
-async function insertEntry(dateStr, type, minutes){
-  const { error } = await sb.from('play_entries').insert({ entry_date: dateStr, type, minutes });
+async function insertEntry(dateStr, type, minutes, memo){
+  const { error } = await sb.from('play_entries').insert({ entry_date: dateStr, type, minutes, memo: memo || null });
   if(error) throw error;
 }
 async function deleteEntryRow(id){
   const { error } = await sb.from('play_entries').delete().eq('id', id);
   if(error) throw error;
 }
-async function ensureType(name){
+async function ensureType(name, color){
   const nextOrder = types.length;
   const { error } = await sb.from('play_types').upsert(
-    { name, sort_order: nextOrder },
+    { name, sort_order: nextOrder, color },
     { onConflict: 'name', ignoreDuplicates: true }
   );
   if(error) throw error;
@@ -446,7 +557,7 @@ function renderLegend(){
   legend.innerHTML = '';
   types.forEach(t=>{
     const span = document.createElement('span');
-    span.innerHTML = `<span class="dot" style="background:${colorForType(t)}"></span>${escapeHtml(t)}`;
+    span.innerHTML = `<span class="dot" style="background:${t.color}"></span>${escapeHtml(t.name)}`;
     legend.appendChild(span);
   });
 }
@@ -511,6 +622,7 @@ function openPanel(dateStr){
   duration = 30;
   durationVal.textContent = duration;
   customTypeInput.value = '';
+  memoInput.value = '';
   selectedType = null;
   renderTypeChips();
   renderEntries();
@@ -526,12 +638,11 @@ function renderTypeChips(){
   typeChipsEl.innerHTML = '';
   types.forEach(t=>{
     const chip = document.createElement('button');
-    chip.className = 'type-chip' + (selectedType===t?' selected':'');
-    chip.textContent = t;
-    const color = colorForType(t);
-    if(selectedType===t){ chip.style.background = color; chip.style.borderColor = color; }
+    chip.className = 'type-chip' + (selectedType===t.name?' selected':'');
+    chip.textContent = t.name;
+    if(selectedType===t.name){ chip.style.background = t.color; chip.style.borderColor = t.color; }
     chip.addEventListener('click', ()=>{
-      selectedType = (selectedType===t) ? null : t;
+      selectedType = (selectedType===t.name) ? null : t.name;
       customTypeInput.value = '';
       renderTypeChips();
     });
@@ -569,6 +680,7 @@ function renderEntries(){
       <div class="info">
         <div class="type">${escapeHtml(e.type)}</div>
         <div class="mins">${e.minutes}분</div>
+        ${e.memo ? `<div class="memo">📝 ${escapeHtml(e.memo)}</div>` : ''}
       </div>
       <button class="del" data-id="${e.id}">✕</button>
     `;
@@ -622,14 +734,17 @@ document.getElementById('addBtn').addEventListener('click', async ()=>{
   addBtn.disabled = true;
   addBtn.textContent = '추가하는 중...';
   try{
-    if(!types.includes(type)){
-      await ensureType(type);
-      types.push(type);
+    if(!types.find(t=>t.name===type)){
+      const color = pickUnusedColor();
+      await ensureType(type, color);
+      types.push({ name: type, color });
     }
-    await insertEntry(selectedDate, type, duration);
+    const memo = memoInput.value.trim();
+    await insertEntry(selectedDate, type, duration, memo);
     if(!data[selectedDate]) data[selectedDate] = [];
-    data[selectedDate].push({ id: 'temp-'+Date.now(), type, minutes: duration });
+    data[selectedDate].push({ id: 'temp-'+Date.now(), type, minutes: duration, memo });
     customTypeInput.value = '';
+    memoInput.value = '';
     selectedType = null;
     duration = 30;
     durationVal.textContent = duration;
@@ -650,17 +765,23 @@ document.getElementById('addBtn').addEventListener('click', async ()=>{
 document.getElementById('closeBtn').addEventListener('click', closePanel);
 overlay.addEventListener('click', (e)=>{ if(e.target===overlay) closePanel(); });
 
+function onMonthChanged(){
+  renderCalendar();
+  if(statsOverlay.classList.contains('open') && statsScope === 'month'){
+    renderStats();
+  }
+}
 document.getElementById('prevBtn').addEventListener('click', ()=>{
   current = new Date(current.getFullYear(), current.getMonth()-1, 1);
-  renderCalendar();
+  onMonthChanged();
 });
 document.getElementById('nextBtn').addEventListener('click', ()=>{
   current = new Date(current.getFullYear(), current.getMonth()+1, 1);
-  renderCalendar();
+  onMonthChanged();
 });
 document.getElementById('todayBtn').addEventListener('click', ()=>{
   current = new Date();
-  renderCalendar();
+  onMonthChanged();
 });
 
 function renderTypesEditor(){
@@ -669,9 +790,9 @@ function renderTypesEditor(){
     const row = document.createElement('div');
     row.className = 'type-row';
     row.innerHTML = `
-      <div class="chip-dot" style="background:${colorForType(t)}"></div>
-      <input type="text" value="${escapeHtml(t)}" data-name="${escapeHtml(t)}">
-      <button class="del" data-name="${escapeHtml(t)}" title="삭제">✕</button>
+      <div class="chip-dot" style="background:${t.color}"></div>
+      <input type="text" value="${escapeHtml(t.name)}" data-name="${escapeHtml(t.name)}">
+      <button class="del" data-name="${escapeHtml(t.name)}" title="삭제">✕</button>
     `;
     typesEditorList.appendChild(row);
   });
@@ -723,10 +844,10 @@ updateNewTypeBtnState();
 
 newTypeBtn.addEventListener('click', async ()=>{
   const name = newTypeInput.value.trim();
-  if(!name || types.includes(name)) return;
+  if(!name || types.find(t=>t.name===name)) return;
   newTypeBtn.disabled = true;
   try{
-    await ensureType(name);
+    await ensureType(name, pickUnusedColor());
     newTypeInput.value = '';
     await refreshAndRender();
     renderTypesEditor();
@@ -782,6 +903,94 @@ document.getElementById('exportBtn').addEventListener('click', async ()=>{
     btn.disabled = false;
     btn.textContent = originalText;
   }
+});
+
+// ---------- Stats ----------
+function computeStats(scope){
+  const y = current.getFullYear(), m = current.getMonth();
+  const perType = {}; // name -> {count, minutes}
+  let totalCount = 0, totalMinutes = 0;
+  const activeDates = new Set();
+
+  Object.keys(data).forEach(dateStr=>{
+    if(scope === 'month'){
+      const [dy, dm] = dateStr.split('-').map(Number);
+      if(dy !== y || dm !== m + 1) return;
+    }
+    const entries = data[dateStr];
+    if(!entries || !entries.length) return;
+    activeDates.add(dateStr);
+    entries.forEach(e=>{
+      if(!perType[e.type]) perType[e.type] = { count: 0, minutes: 0 };
+      perType[e.type].count++;
+      perType[e.type].minutes += e.minutes;
+      totalCount++;
+      totalMinutes += e.minutes;
+    });
+  });
+
+  return { perType, totalCount, totalMinutes, activeDays: activeDates.size };
+}
+
+function renderStats(){
+  const stats = computeStats(statsScope);
+  const h = Math.floor(stats.totalMinutes / 60), mm = stats.totalMinutes % 60;
+  const label = statsScope === 'month' ? `${current.getFullYear()}년 ${current.getMonth() + 1}월` : '전체 기간';
+
+  statsSummary.innerHTML = `
+    <div class="stats-summary-title">${label}</div>
+    <div class="stats-summary-nums">
+      <div><strong>${stats.totalCount}</strong><span>놀이 횟수</span></div>
+      <div><strong>${stats.activeDays}</strong><span>활동한 날</span></div>
+      <div><strong>${h > 0 ? h + '시간 ' : ''}${mm}분</strong><span>총 시간</span></div>
+    </div>
+  `;
+
+  statsList.innerHTML = '';
+  const rows = Object.entries(stats.perType).sort((a, b)=> b[1].minutes - a[1].minutes);
+  if(!rows.length){
+    statsList.innerHTML = '<div class="empty-note">기록된 놀이가 없어요.</div>';
+    return;
+  }
+  const maxMinutes = Math.max(...rows.map(r=>r[1].minutes));
+  rows.forEach(([name, s])=>{
+    const pct = stats.totalMinutes ? Math.round(s.minutes / stats.totalMinutes * 100) : 0;
+    const barPct = maxMinutes ? Math.round(s.minutes / maxMinutes * 100) : 0;
+    const color = colorForType(name);
+    const row = document.createElement('div');
+    row.className = 'stats-row';
+    row.innerHTML = `
+      <div class="stats-row-head">
+        <span class="chip-dot" style="background:${color}"></span>
+        <span class="stats-row-name">${escapeHtml(name)}</span>
+        <span class="stats-row-nums">${s.count}회 · ${s.minutes}분 (${pct}%)</span>
+      </div>
+      <div class="stats-bar-track"><div class="stats-bar-fill" style="width:${barPct}%; background:${color}"></div></div>
+    `;
+    statsList.appendChild(row);
+  });
+}
+
+document.getElementById('statsBtn').addEventListener('click', ()=>{
+  renderStats();
+  statsOverlay.classList.add('open');
+});
+document.getElementById('closeStatsBtn').addEventListener('click', ()=>{
+  statsOverlay.classList.remove('open');
+});
+statsOverlay.addEventListener('click', (e)=>{ if(e.target===statsOverlay){ statsOverlay.classList.remove('open'); } });
+
+document.getElementById('statsMonthBtn').addEventListener('click', ()=>{
+  statsScope = 'month';
+  document.getElementById('statsMonthBtn').classList.add('selected');
+  document.getElementById('statsAllBtn').classList.remove('selected');
+  renderStats();
+});
+document.getElementById('statsAllBtn').addEventListener('click', ()=>{
+  statsScope = 'all';
+  document.getElementById('statsAllBtn').classList.add('selected');
+  document.getElementById('statsMonthBtn').classList.remove('selected');
+  renderStats();
 });
 
 // ---------- Init + realtime subscriptions ----------

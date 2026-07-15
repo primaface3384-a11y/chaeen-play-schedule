@@ -113,3 +113,47 @@ alter table play_types_deleted enable row level security;
 --   select * from play_entries_deleted order by deleted_at desc;
 --   insert into play_entries (id, entry_date, type, minutes, created_at)
 --     select id, entry_date, type, minutes, created_at from play_entries_deleted where id = '복구할-id';
+
+-- ============================================================
+-- 7) 놀이 종류별 고유 색상 + 놀이 기록 메모 (추가 컬럼만, 기존 데이터는 안전)
+-- ============================================================
+alter table play_types add column if not exists color text;
+alter table play_entries add column if not exists memo text;
+
+-- 기본 8개 놀이 종류는 색이 비어있으면 원래 팔레트 순서대로 배정.
+-- (그 외 커스텀으로 추가된 놀이 종류 중 색이 비어있는 게 있으면, 앱이 처음 불러올 때
+-- 자동으로 겹치지 않는 색을 배정해서 다시 저장해줍니다 — 별도 SQL 조치 필요 없음.)
+update play_types set color = case name
+  when '블록놀이' then '#FF8A70'
+  when '그림그리기' then '#FFC94A'
+  when '책읽기' then '#4FB0E8'
+  when '소꿉놀이' then '#6BC79E'
+  when '야외놀이' then '#B18FE0'
+  when '노래율동' then '#F786B0'
+  when '퍼즐' then '#F2A65A'
+  when '물놀이' then '#7FC8C4'
+  else color
+end
+where color is null;
+
+-- 보관함 테이블에도 같은 컬럼 추가 (삭제된 놀이의 색/메모도 그대로 보관)
+alter table play_types_deleted add column if not exists color text;
+alter table play_entries_deleted add column if not exists memo text;
+
+create or replace function archive_deleted_play_entry()
+returns trigger as $$
+begin
+  insert into play_entries_deleted (id, entry_date, type, minutes, memo, created_at)
+  values (old.id, old.entry_date, old.type, old.minutes, old.memo, old.created_at);
+  return old;
+end;
+$$ language plpgsql;
+
+create or replace function archive_deleted_play_type()
+returns trigger as $$
+begin
+  insert into play_types_deleted (id, name, sort_order, color, created_at)
+  values (old.id, old.name, old.sort_order, old.color, old.created_at);
+  return old;
+end;
+$$ language plpgsql;
