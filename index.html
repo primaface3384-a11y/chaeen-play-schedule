@@ -125,13 +125,41 @@
     display:flex; align-items:center; gap:10px;
     background: var(--bg); border-radius: 12px; padding: 10px 12px;
   }
-  .entry .chip-dot{ width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+  .entry .chip-dot{ width:12px; height:12px; border-radius:50%; flex-shrink:0; margin-top:3px; align-self:flex-start; }
   .entry .info{ flex:1; }
   .entry .type{ font-size:14px; font-weight:600; }
   .entry .mins{ font-size:12px; color: var(--ink-soft); }
-  .entry .del{ border:none; background:none; color: var(--ink-soft); font-size:16px; cursor:pointer; padding:4px 6px; }
+  .entry .actions{ display:flex; flex-direction:column; gap:2px; }
+  .entry .edit-btn, .entry .del{ border:none; background:none; color: var(--ink-soft); font-size:15px; cursor:pointer; padding:4px 6px; }
+  .entry .edit-btn:hover{ color: var(--lavender); }
   .entry .del:hover{ color: var(--coral); }
   .empty-note{ font-size:13px; color: var(--ink-soft); text-align:center; padding: 14px 0; }
+
+  .entry-edit-form{
+    background: var(--bg); border-radius: 12px; padding: 10px 12px;
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .entry-edit-form .edit-duration-row{ display:flex; align-items:center; gap:10px; }
+  .entry-edit-form .edit-duration-row button{
+    width:34px; height:34px; border-radius:10px; border:none; background: var(--paper);
+    font-size:16px; cursor:pointer; box-shadow: 0 1px 4px rgba(46,59,54,0.08); color: var(--ink);
+  }
+  .entry-edit-form .edit-duration-val{ flex:1; text-align:center; font-family:'Gaegu',cursive; font-size:20px; }
+  .entry-edit-form textarea{
+    width:100%; border:1.5px solid var(--line); border-radius:10px; padding:8px 10px;
+    font-size:13px; font-family:'Gowun Dodum',sans-serif; background: var(--paper); color: var(--ink);
+    resize: vertical; min-height:40px;
+  }
+  .entry-edit-form textarea:focus{ outline:none; border-color: var(--lavender); }
+  .entry-edit-form .edit-form-actions{ display:flex; gap:8px; }
+  .entry-edit-form .edit-save{
+    flex:1; border:none; border-radius:10px; padding:8px; background: var(--grass); color:#fff;
+    font-size:13px; cursor:pointer; font-family:'Gowun Dodum',sans-serif; font-weight:600;
+  }
+  .entry-edit-form .edit-cancel{
+    flex:1; border:1.5px solid var(--line); border-radius:10px; padding:8px; background: var(--paper); color: var(--ink-soft);
+    font-size:13px; cursor:pointer; font-family:'Gowun Dodum',sans-serif;
+  }
 
   .day-summary{ font-size:12px; color: var(--ink-soft); margin: -8px 0 14px; }
 
@@ -386,6 +414,8 @@ let selectedDate = null;
 let selectedType = null;
 let duration = 30;
 let statsScope = 'month'; // 'month' | 'all'
+let editingEntryId = null;
+let editDuration = 30;
 
 const grid = document.getElementById('grid');
 const monthLabel = document.getElementById('monthLabel');
@@ -529,6 +559,10 @@ async function deleteEntryRow(id){
   const { error } = await sb.from('play_entries').delete().eq('id', id);
   if(error) throw error;
 }
+async function updateEntryRow(id, minutes, memo){
+  const { error } = await sb.from('play_entries').update({ minutes, memo: memo || null }).eq('id', id);
+  if(error) throw error;
+}
 async function ensureType(name, color){
   const nextOrder = types.length;
   const { error } = await sb.from('play_types').upsert(
@@ -648,6 +682,7 @@ function openPanel(dateStr){
   customTypeInput.value = '';
   memoInput.value = '';
   selectedType = null;
+  editingEntryId = null;
   renderTypeChips();
   renderEntries();
   overlay.classList.add('open');
@@ -656,6 +691,7 @@ function openPanel(dateStr){
 function closePanel(){
   overlay.classList.remove('open');
   selectedDate = null;
+  editingEntryId = null;
 }
 
 function renderTypeChips(){
@@ -697,6 +733,59 @@ function renderEntries(){
   daySummary.textContent = `오늘 총 ${entries.length}개 놀이 · ${h>0 ? h+'시간 ':''}${mm}분`;
 
   entries.forEach(e=>{
+    if(String(e.id) === String(editingEntryId)){
+      const row = document.createElement('div');
+      row.className = 'entry-edit-form';
+      row.innerHTML = `
+        <div class="type">${escapeHtml(e.type)}</div>
+        <div class="edit-duration-row">
+          <button class="edit-minus" type="button">−</button>
+          <div class="edit-duration-val"><span id="editDurationVal">${editDuration}</span> 분</div>
+          <button class="edit-plus" type="button">+</button>
+        </div>
+        <textarea class="edit-memo" rows="2" placeholder="메모 (선택)">${escapeHtml(e.memo || '')}</textarea>
+        <div class="edit-form-actions">
+          <button class="edit-cancel" type="button">취소</button>
+          <button class="edit-save" type="button">저장</button>
+        </div>
+      `;
+      entryList.appendChild(row);
+
+      row.querySelector('.edit-minus').addEventListener('click', ()=>{
+        editDuration = Math.max(10, editDuration - 10);
+        row.querySelector('#editDurationVal').textContent = editDuration;
+      });
+      row.querySelector('.edit-plus').addEventListener('click', ()=>{
+        editDuration = Math.min(600, editDuration + 10);
+        row.querySelector('#editDurationVal').textContent = editDuration;
+      });
+      row.querySelector('.edit-cancel').addEventListener('click', ()=>{
+        editingEntryId = null;
+        renderEntries();
+      });
+      row.querySelector('.edit-save').addEventListener('click', async ()=>{
+        const saveBtn = row.querySelector('.edit-save');
+        saveBtn.disabled = true;
+        saveBtn.textContent = '저장 중...';
+        try{
+          const memo = row.querySelector('.edit-memo').value.trim();
+          await updateEntryRow(e.id, editDuration, memo);
+          const list = data[selectedDate] || [];
+          const target = list.find(x=>String(x.id)===String(e.id));
+          if(target){ target.minutes = editDuration; target.memo = memo; }
+          editingEntryId = null;
+          renderEntries();
+          renderCalendar();
+        }catch(err){
+          console.error('수정 오류', err);
+          alert('수정에 실패했어요. 인터넷 연결을 확인해주세요.');
+          saveBtn.disabled = false;
+          saveBtn.textContent = '저장';
+        }
+      });
+      return;
+    }
+
     const row = document.createElement('div');
     row.className = 'entry';
     row.innerHTML = `
@@ -706,9 +795,23 @@ function renderEntries(){
         <div class="mins">${e.minutes}분</div>
         ${e.memo ? `<div class="memo">📝 ${escapeHtml(e.memo)}</div>` : ''}
       </div>
-      <button class="del" data-id="${e.id}">✕</button>
+      <div class="actions">
+        <button class="edit-btn" data-id="${e.id}" title="수정">✏️</button>
+        <button class="del" data-id="${e.id}">✕</button>
+      </div>
     `;
     entryList.appendChild(row);
+  });
+
+  entryList.querySelectorAll('.edit-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.getAttribute('data-id');
+      const entry = (data[selectedDate] || []).find(x=>String(x.id)===String(id));
+      if(!entry) return;
+      editingEntryId = id;
+      editDuration = entry.minutes;
+      renderEntries();
+    });
   });
 
   entryList.querySelectorAll('.del').forEach(btn=>{
@@ -720,6 +823,7 @@ function renderEntries(){
         // realtime subscription will trigger refreshAndRender(); but update optimistically too
         data[selectedDate] = (data[selectedDate]||[]).filter(e=>String(e.id)!==id);
         if(data[selectedDate].length===0) delete data[selectedDate];
+        if(String(editingEntryId) === String(id)) editingEntryId = null;
         renderEntries();
         renderCalendar();
       }catch(e){
