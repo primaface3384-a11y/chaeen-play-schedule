@@ -199,6 +199,32 @@
   .memo-row textarea:focus{ outline:none; border-color: var(--lavender); }
   .entry .memo{ font-size:12px; color: var(--ink-soft); margin-top:3px; white-space:pre-wrap; line-height:1.4; }
 
+  .photo-row{ margin-bottom:14px; }
+  .photo-pick-btn{
+    border:1.5px dashed var(--line); background: var(--paper); color: var(--ink-soft);
+    border-radius:10px; padding:10px; width:100%; font-size:13px; cursor:pointer;
+    font-family:'Gowun Dodum',sans-serif;
+  }
+  .photo-pick-btn:hover{ border-color: var(--lavender); color: var(--ink); }
+  .photo-preview-wrap{ position:relative; display:inline-block; margin-bottom:14px; }
+  .photo-preview-img{ display:block; max-width:140px; max-height:140px; border-radius:12px; object-fit:cover; }
+  .photo-remove-btn{
+    position:absolute; top:-8px; right:-8px; width:24px; height:24px; border-radius:50%;
+    border:none; background: var(--coral); color:#fff; font-size:12px; cursor:pointer; line-height:1;
+  }
+  .entry .photo-thumb{
+    width:48px; height:48px; border-radius:10px; object-fit:cover; margin-top:6px; cursor:pointer; display:block;
+  }
+  .entry-edit-form .photo-edit-row{ display:flex; align-items:center; gap:10px; }
+  .entry-edit-form .photo-preview-img{ max-width:70px; max-height:70px; }
+
+  .lightbox{
+    position:fixed; inset:0; background: rgba(0,0,0,0.85); z-index:60;
+    display:none; align-items:center; justify-content:center; padding:20px;
+  }
+  .lightbox.open{ display:flex; }
+  .lightbox img{ max-width:100%; max-height:100%; border-radius:12px; }
+
   .add-btn{
     width:100%; border:none; border-radius:12px; padding:12px; font-size:15px;
     background: var(--coral); color:#fff; cursor:pointer; font-family:'Gowun Dodum',sans-serif; font-weight:600;
@@ -363,6 +389,16 @@
         <textarea id="memoInput" rows="2" placeholder="예: 처음으로 혼자 완성했어요!"></textarea>
       </div>
 
+      <span class="label">사진 (선택)</span>
+      <div class="photo-row">
+        <button type="button" class="photo-pick-btn" id="photoPickBtn">📷 사진 선택</button>
+        <input type="file" id="photoInput" accept="image/*" style="display:none;">
+      </div>
+      <div class="photo-preview-wrap" id="photoPreviewWrap" style="display:none;">
+        <img class="photo-preview-img" id="photoPreviewImg">
+        <button type="button" class="photo-remove-btn" id="photoRemoveBtn">✕</button>
+      </div>
+
       <button class="add-btn" id="addBtn">놀이 추가하기</button>
     </div>
   </div>
@@ -400,6 +436,10 @@
     <div class="stats-summary" id="statsSummary"></div>
     <div class="stats-list" id="statsList"></div>
   </div>
+</div>
+
+<div class="lightbox" id="photoLightbox">
+  <img id="lightboxImg" src="" alt="놀이 사진">
 </div>
 
 <script>
@@ -441,6 +481,11 @@ let statsScope = 'month'; // 'month' | 'all'
 let statsSelectedType = null;
 let editingEntryId = null;
 let editDuration = 30;
+let pendingPhotoBlob = null;
+let pendingPhotoPreviewUrl = null;
+let editPhotoBlob = null;
+let editPhotoPreviewUrl = null;
+let editPhotoRemoved = false;
 
 const grid = document.getElementById('grid');
 const monthLabel = document.getElementById('monthLabel');
@@ -460,6 +505,13 @@ const newTypeBtn = document.getElementById('newTypeBtn');
 const statsOverlay = document.getElementById('statsOverlay');
 const statsSummary = document.getElementById('statsSummary');
 const statsList = document.getElementById('statsList');
+const photoInput = document.getElementById('photoInput');
+const photoPickBtn = document.getElementById('photoPickBtn');
+const photoPreviewWrap = document.getElementById('photoPreviewWrap');
+const photoPreviewImg = document.getElementById('photoPreviewImg');
+const photoRemoveBtn = document.getElementById('photoRemoveBtn');
+const photoLightbox = document.getElementById('photoLightbox');
+const lightboxImg = document.getElementById('lightboxImg');
 const syncDot = document.getElementById('syncDot');
 const syncLabel = document.getElementById('syncLabel');
 
@@ -475,6 +527,51 @@ function withTimeout(promise, ms, label){
     promise,
     new Promise((_, reject)=> setTimeout(()=> reject(new Error(`${label} 응답 없음 (${ms/1000}초 초과)`)), ms))
   ]);
+}
+
+// Downscales/compresses a picked photo before upload — mobile camera
+// photos are often several MB, and nobody needs full resolution for a
+// thumbnail-sized memory. Modern browsers already apply EXIF rotation
+// when decoding into an <img>/canvas, so no manual rotation handling here.
+const PHOTO_MAX_DIM = 1600;
+const PHOTO_QUALITY = 0.8;
+function resizePhoto(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let { width, height } = img;
+        if(width > PHOTO_MAX_DIM || height > PHOTO_MAX_DIM){
+          if(width > height){ height = Math.round(height * PHOTO_MAX_DIM / width); width = PHOTO_MAX_DIM; }
+          else{ width = Math.round(width * PHOTO_MAX_DIM / height); height = PHOTO_MAX_DIM; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        canvas.toBlob(blob=>{
+          if(blob) resolve(blob); else reject(new Error('이미지 처리 실패'));
+        }, 'image/jpeg', PHOTO_QUALITY);
+      };
+      img.onerror = ()=> reject(new Error('이미지를 읽지 못했어요'));
+      img.src = reader.result;
+    };
+    reader.onerror = ()=> reject(new Error('파일을 읽지 못했어요'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadPhoto(blob){
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const { error } = await sb.storage.from('play-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+  if(error) throw error;
+  return path;
+}
+
+function publicPhotoUrl(path){
+  if(!path) return null;
+  const { data } = sb.storage.from('play-photos').getPublicUrl(path);
+  return data && data.publicUrl;
 }
 
 function hslToHex(h, s, l){
@@ -531,7 +628,7 @@ async function fetchAll(){
   (entriesRes.data || []).forEach(row=>{
     const d = row.entry_date;
     if(!newData[d]) newData[d] = [];
-    newData[d].push({ id: row.id, type: row.type, minutes: row.minutes, memo: row.memo || '' });
+    newData[d].push({ id: row.id, type: row.type, minutes: row.minutes, memo: row.memo || '', photoPath: row.photo_path || null });
   });
   const newTypes = (typesRes.data && typesRes.data.length)
     ? typesRes.data.map(r=>({ name: r.name, color: r.color, sortOrder: r.sort_order }))
@@ -576,16 +673,16 @@ async function refreshAndRender(){
   }
 }
 
-async function insertEntry(dateStr, type, minutes, memo){
-  const { error } = await sb.from('play_entries').insert({ entry_date: dateStr, type, minutes, memo: memo || null });
+async function insertEntry(dateStr, type, minutes, memo, photoPath){
+  const { error } = await sb.from('play_entries').insert({ entry_date: dateStr, type, minutes, memo: memo || null, photo_path: photoPath || null });
   if(error) throw error;
 }
 async function deleteEntryRow(id){
   const { error } = await sb.from('play_entries').delete().eq('id', id);
   if(error) throw error;
 }
-async function updateEntryRow(id, minutes, memo){
-  const { error } = await sb.from('play_entries').update({ minutes, memo: memo || null }).eq('id', id);
+async function updateEntryRow(id, minutes, memo, photoPath){
+  const { error } = await sb.from('play_entries').update({ minutes, memo: memo || null, photo_path: photoPath || null }).eq('id', id);
   if(error) throw error;
 }
 // Next order goes after the highest sort_order currently in use, not
@@ -729,6 +826,13 @@ function renderCalendar(){
   renderLegend();
 }
 
+function clearPendingPhoto(){
+  pendingPhotoBlob = null;
+  if(pendingPhotoPreviewUrl){ URL.revokeObjectURL(pendingPhotoPreviewUrl); pendingPhotoPreviewUrl = null; }
+  photoPreviewWrap.style.display = 'none';
+  photoInput.value = '';
+}
+
 function openPanel(dateStr){
   selectedDate = dateStr;
   const [y,m,d] = dateStr.split('-').map(Number);
@@ -739,6 +843,7 @@ function openPanel(dateStr){
   memoInput.value = '';
   selectedType = null;
   editingEntryId = null;
+  clearPendingPhoto();
   renderTypeChips();
   renderEntries();
   overlay.classList.add('open');
@@ -773,6 +878,52 @@ customTypeInput.addEventListener('input', ()=>{
   }
 });
 
+function resetEditPhotoState(){
+  editPhotoBlob = null;
+  if(editPhotoPreviewUrl){ URL.revokeObjectURL(editPhotoPreviewUrl); editPhotoPreviewUrl = null; }
+  editPhotoRemoved = false;
+}
+
+// Redraws just the photo controls inside an entry's edit form, without
+// touching the rest of the form (so an in-progress memo edit isn't wiped
+// out by picking/removing a photo).
+function updateEditPhotoRow(container, entry){
+  let effectiveUrl = null;
+  if(editPhotoBlob) effectiveUrl = editPhotoPreviewUrl;
+  else if(!editPhotoRemoved && entry.photoPath) effectiveUrl = publicPhotoUrl(entry.photoPath);
+
+  container.innerHTML = effectiveUrl
+    ? `<img class="photo-preview-img" src="${effectiveUrl}"><button type="button" class="edit-photo-remove">✕ 사진 제거</button><input type="file" class="edit-photo-input" accept="image/*" style="display:none;">`
+    : `<button type="button" class="edit-photo-pick">📷 사진 추가</button><input type="file" class="edit-photo-input" accept="image/*" style="display:none;">`;
+
+  const pickBtn = container.querySelector('.edit-photo-pick');
+  if(pickBtn) pickBtn.addEventListener('click', ()=> container.querySelector('.edit-photo-input').click());
+
+  const removeBtn = container.querySelector('.edit-photo-remove');
+  if(removeBtn) removeBtn.addEventListener('click', ()=>{
+    editPhotoBlob = null;
+    if(editPhotoPreviewUrl){ URL.revokeObjectURL(editPhotoPreviewUrl); editPhotoPreviewUrl = null; }
+    editPhotoRemoved = true;
+    updateEditPhotoRow(container, entry);
+  });
+
+  container.querySelector('.edit-photo-input').addEventListener('change', async (ev)=>{
+    const file = ev.target.files[0];
+    if(!file) return;
+    try{
+      const blob = await resizePhoto(file);
+      editPhotoBlob = blob;
+      if(editPhotoPreviewUrl) URL.revokeObjectURL(editPhotoPreviewUrl);
+      editPhotoPreviewUrl = URL.createObjectURL(blob);
+      editPhotoRemoved = false;
+      updateEditPhotoRow(container, entry);
+    }catch(err){
+      console.error('사진 처리 오류', err);
+      alert('사진을 불러오지 못했어요.');
+    }
+  });
+}
+
 function renderEntries(){
   const entries = data[selectedDate] || [];
   entryList.innerHTML = '';
@@ -800,12 +951,14 @@ function renderEntries(){
           <button class="edit-plus" type="button">+</button>
         </div>
         <textarea class="edit-memo" rows="2" placeholder="메모 (선택)">${escapeHtml(e.memo || '')}</textarea>
+        <div class="photo-edit-row"></div>
         <div class="edit-form-actions">
           <button class="edit-cancel" type="button">취소</button>
           <button class="edit-save" type="button">저장</button>
         </div>
       `;
       entryList.appendChild(row);
+      updateEditPhotoRow(row.querySelector('.photo-edit-row'), e);
 
       row.querySelector('.edit-minus').addEventListener('click', ()=>{
         editDuration = Math.max(10, editDuration - 10);
@@ -817,6 +970,7 @@ function renderEntries(){
       });
       row.querySelector('.edit-cancel').addEventListener('click', ()=>{
         editingEntryId = null;
+        resetEditPhotoState();
         renderEntries();
       });
       row.querySelector('.edit-save').addEventListener('click', async ()=>{
@@ -825,11 +979,20 @@ function renderEntries(){
         saveBtn.textContent = '저장 중...';
         try{
           const memo = row.querySelector('.edit-memo').value.trim();
-          await updateEntryRow(e.id, editDuration, memo);
+          let photoPath = e.photoPath || null;
+          if(editPhotoBlob){
+            saveBtn.textContent = '사진 업로드 중...';
+            photoPath = await uploadPhoto(editPhotoBlob);
+            saveBtn.textContent = '저장 중...';
+          }else if(editPhotoRemoved){
+            photoPath = null;
+          }
+          await updateEntryRow(e.id, editDuration, memo, photoPath);
           const list = data[selectedDate] || [];
           const target = list.find(x=>String(x.id)===String(e.id));
-          if(target){ target.minutes = editDuration; target.memo = memo; }
+          if(target){ target.minutes = editDuration; target.memo = memo; target.photoPath = photoPath; }
           editingEntryId = null;
+          resetEditPhotoState();
           renderEntries();
           renderCalendar();
         }catch(err){
@@ -850,6 +1013,7 @@ function renderEntries(){
         <div class="type">${escapeHtml(e.type)}</div>
         <div class="mins">${e.minutes}분</div>
         ${e.memo ? `<div class="memo">📝 ${escapeHtml(e.memo)}</div>` : ''}
+        ${e.photoPath ? `<img class="photo-thumb" src="${publicPhotoUrl(e.photoPath)}" data-url="${publicPhotoUrl(e.photoPath)}">` : ''}
       </div>
       <div class="actions">
         <button class="edit-btn" data-id="${e.id}" title="수정">✏️</button>
@@ -859,6 +1023,10 @@ function renderEntries(){
     entryList.appendChild(row);
   });
 
+  entryList.querySelectorAll('.photo-thumb').forEach(img=>{
+    img.addEventListener('click', ()=> openLightbox(img.getAttribute('data-url')));
+  });
+
   entryList.querySelectorAll('.edit-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.getAttribute('data-id');
@@ -866,6 +1034,7 @@ function renderEntries(){
       if(!entry) return;
       editingEntryId = id;
       editDuration = entry.minutes;
+      resetEditPhotoState();
       renderEntries();
     });
   });
@@ -879,7 +1048,7 @@ function renderEntries(){
         // realtime subscription will trigger refreshAndRender(); but update optimistically too
         data[selectedDate] = (data[selectedDate]||[]).filter(e=>String(e.id)!==id);
         if(data[selectedDate].length===0) delete data[selectedDate];
-        if(String(editingEntryId) === String(id)) editingEntryId = null;
+        if(String(editingEntryId) === String(id)){ editingEntryId = null; resetEditPhotoState(); }
         renderEntries();
         renderCalendar();
       }catch(e){
@@ -906,6 +1075,35 @@ document.getElementById('plusBtn').addEventListener('click', ()=>{
   durationVal.textContent = duration;
 });
 
+photoPickBtn.addEventListener('click', ()=> photoInput.click());
+photoInput.addEventListener('change', async ()=>{
+  const file = photoInput.files[0];
+  if(!file) return;
+  try{
+    const blob = await resizePhoto(file);
+    pendingPhotoBlob = blob;
+    if(pendingPhotoPreviewUrl) URL.revokeObjectURL(pendingPhotoPreviewUrl);
+    pendingPhotoPreviewUrl = URL.createObjectURL(blob);
+    photoPreviewImg.src = pendingPhotoPreviewUrl;
+    photoPreviewWrap.style.display = 'inline-block';
+  }catch(e){
+    console.error('사진 처리 오류', e);
+    alert('사진을 불러오지 못했어요.');
+  }finally{
+    photoInput.value = '';
+  }
+});
+photoRemoveBtn.addEventListener('click', clearPendingPhoto);
+
+function openLightbox(url){
+  lightboxImg.src = url;
+  photoLightbox.classList.add('open');
+}
+photoLightbox.addEventListener('click', ()=>{
+  photoLightbox.classList.remove('open');
+  lightboxImg.src = '';
+});
+
 document.getElementById('addBtn').addEventListener('click', async ()=>{
   const type = (customTypeInput.value.trim()) || selectedType;
   if(!type){
@@ -923,11 +1121,18 @@ document.getElementById('addBtn').addEventListener('click', async ()=>{
       types.push({ name: type, color, sortOrder });
     }
     const memo = memoInput.value.trim();
-    await insertEntry(selectedDate, type, duration, memo);
+    let photoPath = null;
+    if(pendingPhotoBlob){
+      addBtn.textContent = '사진 업로드 중...';
+      photoPath = await uploadPhoto(pendingPhotoBlob);
+      addBtn.textContent = '추가하는 중...';
+    }
+    await insertEntry(selectedDate, type, duration, memo, photoPath);
     if(!data[selectedDate]) data[selectedDate] = [];
-    data[selectedDate].push({ id: 'temp-'+Date.now(), type, minutes: duration, memo });
+    data[selectedDate].push({ id: 'temp-'+Date.now(), type, minutes: duration, memo, photoPath });
     customTypeInput.value = '';
     memoInput.value = '';
+    clearPendingPhoto();
     selectedType = null;
     duration = 30;
     durationVal.textContent = duration;
