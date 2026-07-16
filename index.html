@@ -322,15 +322,69 @@
     padding:14px; font-size:13px; line-height:1.6; margin-bottom:16px; color: var(--ink);
   }
   .setup-banner code{ background: rgba(0,0,0,0.06); padding:1px 5px; border-radius:5px; font-size:12px; }
+
+  .auth-screen{
+    min-height:100vh; display:none; align-items:center; justify-content:center; padding:20px;
+  }
+  .auth-screen.show{ display:flex; }
+  .auth-card{
+    background: var(--paper); border-radius:20px; padding:32px 26px; text-align:center;
+    max-width:340px; width:100%; box-shadow: 0 2px 16px rgba(46,59,54,0.08);
+  }
+  .auth-card h1{ font-family:'Gaegu',cursive; font-size:26px; margin:0 0 8px; }
+  .auth-card p{ font-size:13px; color: var(--ink-soft); line-height:1.6; margin:0 0 20px; }
+  .auth-card .auth-email{ font-weight:600; color: var(--ink); }
+  .google-btn{
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    width:100%; border:1.5px solid var(--line); background: var(--paper); color: var(--ink);
+    border-radius:12px; padding:12px; font-size:14px; cursor:pointer; font-family:'Gowun Dodum',sans-serif; font-weight:600;
+  }
+  .google-btn:hover{ background: var(--bg); }
+  .google-btn svg{ width:18px; height:18px; }
+  .signout-link{
+    border:none; background:none; color: var(--ink-soft); font-size:12px; text-decoration:underline;
+    cursor:pointer; font-family:'Gowun Dodum',sans-serif; margin-top:16px;
+  }
+  .signout-link:hover{ color: var(--ink); }
+  .top-signout{
+    text-align:center; margin-top:-8px; margin-bottom:14px;
+  }
+  .top-signout button{
+    border:none; background:none; color: var(--ink-soft); font-size:11px; text-decoration:underline;
+    cursor:pointer; font-family:'Gowun Dodum',sans-serif;
+  }
+  .access-email-row{ display:flex; align-items:center; gap:10px; background: var(--bg); border-radius:12px; padding:10px 12px; }
+  .access-email-row .email{ flex:1; font-size:13px; }
+  .access-email-row .you-tag{ color: var(--ink-soft); font-size:12px; }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="auth-screen" id="loginScreen">
+  <div class="auth-card">
+    <h1><span class="name">채은이</span>의 놀이 스케줄러</h1>
+    <p>가족만 쓰는 앱이에요.<br>구글 계정으로 로그인해주세요.</p>
+    <button class="google-btn" id="googleLoginBtn">
+      <svg viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.1 18.9 12 24 12c3.1 0 5.8 1.1 8 3l6-6C34.6 5.1 29.6 3 24 3c-7.7 0-14.4 4.4-17.7 10.7z"/><path fill="#4CAF50" d="M24 45c5.5 0 10.4-1.8 14.3-5l-6.6-5.6C29.6 35.9 26.9 37 24 37c-5.2 0-9.6-3.5-11.2-8.3l-6.6 5.1C9.5 40.5 16.2 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.6 5.6C41.5 36.3 45 30.9 45 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
+      Google로 로그인
+    </button>
+  </div>
+</div>
+
+<div class="auth-screen" id="notAllowedScreen">
+  <div class="auth-card">
+    <h1><span class="name">채은이</span>의 놀이 스케줄러</h1>
+    <p><span class="auth-email" id="notAllowedEmail"></span> 계정은<br>아직 접근이 허용되지 않았어요.<br>가족 구성원에게 초대를 요청해주세요.</p>
+    <button class="signout-link" id="signOutFromNotAllowedBtn">다른 계정으로 로그인</button>
+  </div>
+</div>
+
+<div class="wrap" id="appWrap" style="display:none;">
   <header class="top">
     <h1><span class="name">채은이</span>의 놀이 스케줄러</h1>
     <p>오늘은 무슨 놀이를 했을까? 🧸</p>
   </header>
   <div class="sync-status"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">연결 중...</span></div>
+  <div class="top-signout"><button id="signOutBtn">로그아웃 (<span id="currentUserEmail"></span>)</button></div>
 
   <div id="setupBanner" class="setup-banner" style="display:none;">
     ⚠️ 아직 Supabase 연결 정보가 설정되지 않았어요.<br>
@@ -359,6 +413,7 @@
     <button class="edit-types-link" id="editTypesBtn">🖍️ 놀이 종류 편집</button>
     <button class="edit-types-link" id="statsBtn">📊 통계</button>
     <button class="edit-types-link" id="exportBtn">💾 데이터 백업</button>
+    <button class="edit-types-link" id="accessBtn">👪 접근 관리</button>
   </div>
 </div>
 
@@ -444,6 +499,23 @@
   <img id="lightboxImg" src="" alt="놀이 사진">
 </div>
 
+<div class="overlay" id="accessOverlay">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>👪 접근 관리</h2>
+      <button class="close" id="closeAccessBtn">✕</button>
+    </div>
+    <div class="types-note">이 이메일로 구글 로그인한 사람만 접근할 수 있어요. 가족을 초대하거나 제거할 수 있어요.</div>
+
+    <div class="types-editor-list" id="accessList"></div>
+
+    <div class="new-type-row">
+      <input type="text" id="newAllowedEmailInput" placeholder="초대할 구글 이메일 입력">
+      <button id="inviteBtn">초대</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ============================================================
 // ⚙️ 설정: Supabase 프로젝트 URL과 anon key를 여기에 넣어주세요.
@@ -516,6 +588,19 @@ const photoLightbox = document.getElementById('photoLightbox');
 const lightboxImg = document.getElementById('lightboxImg');
 const syncDot = document.getElementById('syncDot');
 const syncLabel = document.getElementById('syncLabel');
+const appWrap = document.getElementById('appWrap');
+const loginScreen = document.getElementById('loginScreen');
+const notAllowedScreen = document.getElementById('notAllowedScreen');
+const notAllowedEmail = document.getElementById('notAllowedEmail');
+const currentUserEmail = document.getElementById('currentUserEmail');
+const accessOverlay = document.getElementById('accessOverlay');
+const accessList = document.getElementById('accessList');
+const newAllowedEmailInput = document.getElementById('newAllowedEmailInput');
+const inviteBtn = document.getElementById('inviteBtn');
+
+let currentUser = null;   // { email } once logged in AND allowed
+let allowedEmails = [];
+let appStarted = false;   // guards against re-subscribing to realtime on repeated auth events
 
 function setSyncStatus(state, detail){
   // state: 'on' | 'off' | 'busy'
@@ -1501,19 +1586,119 @@ document.getElementById('statsAllBtn').addEventListener('click', ()=>{
   renderStats();
 });
 
+// ---------- Auth gate ----------
+function showScreen(which){
+  // which: 'login' | 'notAllowed' | 'app'
+  loginScreen.classList.toggle('show', which === 'login');
+  notAllowedScreen.classList.toggle('show', which === 'notAllowed');
+  appWrap.style.display = which === 'app' ? '' : 'none';
+}
+
+async function handleAuthChange(session){
+  if(!session){
+    appStarted = false;
+    currentUser = null;
+    showScreen('login');
+    return;
+  }
+  const email = session.user.email;
+  const { data, error } = await sb.from('allowed_users').select('email').order('created_at', { ascending: true });
+  if(error || !data || !data.length){
+    // Either a real error, or RLS returned zero rows because this email
+    // isn't in allowed_users — both mean "not authorized" from here.
+    notAllowedEmail.textContent = email;
+    showScreen('notAllowed');
+    return;
+  }
+  allowedEmails = data.map(r=>r.email);
+  currentUser = { email };
+  currentUserEmail.textContent = email;
+  showScreen('app');
+  if(!appStarted){
+    appStarted = true;
+    try{
+      await startApp();
+    }catch(e){
+      console.error('초기화 오류', e);
+      setSyncStatus('off', e.message || String(e));
+      renderCalendar();
+    }
+  }
+}
+
+document.getElementById('googleLoginBtn').addEventListener('click', async ()=>{
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin + window.location.pathname }
+  });
+  if(error){
+    console.error('로그인 오류', error);
+    alert('로그인에 실패했어요.');
+  }
+});
+document.getElementById('signOutBtn').addEventListener('click', ()=> sb.auth.signOut());
+document.getElementById('signOutFromNotAllowedBtn').addEventListener('click', ()=> sb.auth.signOut());
+
+// ---------- Access management (invite / remove allowed emails) ----------
+function renderAccessList(){
+  accessList.innerHTML = '';
+  allowedEmails.forEach(email=>{
+    const isSelf = currentUser && email === currentUser.email;
+    const row = document.createElement('div');
+    row.className = 'access-email-row';
+    row.innerHTML = `
+      <span class="email">${escapeHtml(email)}</span>
+      ${isSelf ? '<span class="you-tag">(나)</span>' : `<button class="del" data-email="${escapeHtml(email)}" title="제거">✕</button>`}
+    `;
+    accessList.appendChild(row);
+  });
+  accessList.querySelectorAll('.del').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const email = btn.getAttribute('data-email');
+      if(!confirm(`${email} 계정의 접근 권한을 제거할까요?`)) return;
+      btn.disabled = true;
+      try{
+        const { error } = await sb.from('allowed_users').delete().eq('email', email);
+        if(error) throw error;
+        allowedEmails = allowedEmails.filter(e=>e!==email);
+        renderAccessList();
+      }catch(e){
+        console.error('제거 오류', e);
+        alert('제거에 실패했어요.');
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+inviteBtn.addEventListener('click', async ()=>{
+  const email = newAllowedEmailInput.value.trim().toLowerCase();
+  if(!email || !email.includes('@')){ alert('올바른 이메일을 입력해주세요.'); return; }
+  if(allowedEmails.includes(email)){ alert('이미 등록된 이메일이에요.'); newAllowedEmailInput.value = ''; return; }
+  inviteBtn.disabled = true;
+  try{
+    const { error } = await sb.from('allowed_users').insert({ email });
+    if(error) throw error;
+    allowedEmails.push(email);
+    newAllowedEmailInput.value = '';
+    renderAccessList();
+  }catch(e){
+    console.error('초대 오류', e);
+    alert('초대에 실패했어요.');
+  }finally{
+    inviteBtn.disabled = false;
+  }
+});
+
+document.getElementById('accessBtn').addEventListener('click', ()=>{
+  renderAccessList();
+  accessOverlay.classList.add('open');
+});
+document.getElementById('closeAccessBtn').addEventListener('click', ()=> accessOverlay.classList.remove('open'));
+accessOverlay.addEventListener('click', (e)=>{ if(e.target===accessOverlay) accessOverlay.classList.remove('open'); });
+
 // ---------- Init + realtime subscriptions ----------
-async function init(){
-  if(!configured){
-    document.getElementById('setupBanner').style.display = 'block';
-    setSyncStatus('off');
-    renderCalendar();
-    return;
-  }
-  if(clientInitError){
-    setSyncStatus('off', clientInitError);
-    renderCalendar();
-    return;
-  }
+async function startApp(){
   setSyncStatus('busy');
   await refreshAndRender();
 
@@ -1527,11 +1712,21 @@ async function init(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'play_types' }, ()=> refreshAndRender())
     .subscribe();
 }
-init().catch(e=>{
-  console.error('초기화 오류', e);
-  setSyncStatus('off', e.message || String(e));
+
+if(!configured){
+  document.getElementById('setupBanner').style.display = 'block';
+  setSyncStatus('off');
+  showScreen('app');
   renderCalendar();
-});
+}else if(clientInitError){
+  showScreen('app');
+  setSyncStatus('off', clientInitError);
+  renderCalendar();
+}else{
+  sb.auth.onAuthStateChange((event, session)=>{
+    handleAuthChange(session).catch(e=> console.error('인증 처리 오류', e));
+  });
+}
 </script>
 </body>
 </html>
