@@ -176,3 +176,39 @@ where id in (select id from ranked where rn > 1);
 
 -- 놀이 종류 색상은 이제 DB 차원에서 절대 겹치지 않도록 unique index로 강제합니다.
 create unique index if not exists play_types_color_key on play_types (color) where color is not null;
+
+-- ============================================================
+-- 9) 놀이 기록에 사진 첨부 (추가 컬럼 + Storage 버킷)
+-- ============================================================
+alter table play_entries add column if not exists photo_path text;
+alter table play_entries_deleted add column if not exists photo_path text;
+
+-- 놀이 기록이 삭제돼도(또는 사진이 다른 걸로 교체돼도) Storage의 사진 파일 자체는
+-- 지우지 않습니다 — play_entries_deleted에 photo_path가 그대로 보관되니, 행을
+-- 복구하면 사진도 다시 연결됩니다. (다른 안전장치들과 같은 "지우지 않는다" 원칙.)
+create or replace function archive_deleted_play_entry()
+returns trigger as $$
+begin
+  insert into play_entries_deleted (id, entry_date, type, minutes, memo, photo_path, created_at)
+  values (old.id, old.entry_date, old.type, old.minutes, old.memo, old.photo_path, old.created_at);
+  return old;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+-- 사진을 저장할 공개 Storage 버킷. 가족만 아는 anon key로 쓰는 개인용 도구라
+-- 다른 테이블들과 똑같이 anon key로 업로드/조회/삭제를 모두 허용합니다.
+insert into storage.buckets (id, name, public)
+values ('play-photos', 'play-photos', true)
+on conflict (id) do nothing;
+
+drop policy if exists "anyone can upload play photos" on storage.objects;
+create policy "anyone can upload play photos" on storage.objects
+  for insert with check (bucket_id = 'play-photos');
+
+drop policy if exists "anyone can view play photos" on storage.objects;
+create policy "anyone can view play photos" on storage.objects
+  for select using (bucket_id = 'play-photos');
+
+drop policy if exists "anyone can delete play photos" on storage.objects;
+create policy "anyone can delete play photos" on storage.objects
+  for delete using (bucket_id = 'play-photos');
