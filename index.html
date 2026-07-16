@@ -212,8 +212,8 @@
     position:absolute; top:-8px; right:-8px; width:24px; height:24px; border-radius:50%;
     border:none; background: var(--coral); color:#fff; font-size:12px; cursor:pointer; line-height:1;
   }
-  .entry .photo-thumb{
-    width:48px; height:48px; border-radius:10px; object-fit:cover; margin-top:6px; cursor:pointer; display:block;
+  .photo-thumb{
+    width:48px; height:48px; border-radius:10px; object-fit:cover; margin-top:6px; cursor:pointer; display:block; flex-shrink:0;
   }
   .entry-edit-form .photo-edit-row{ display:flex; align-items:center; gap:10px; }
   .entry-edit-form .photo-preview-img{ max-width:70px; max-height:70px; }
@@ -308,12 +308,14 @@
   .stats-back:hover{ color: var(--ink); }
   .stats-detail-row{
     display:flex; align-items:flex-start; gap:12px; background: var(--bg);
-    border-radius:12px; padding:10px 12px;
+    border-radius:12px; padding:10px 12px; cursor:pointer; transition: background .12s ease;
   }
+  .stats-detail-row:hover{ background:#E3EEE8; }
   .stats-detail-date{ font-size:13px; font-weight:600; color: var(--ink); width:56px; flex-shrink:0; }
   .stats-detail-info{ flex:1; }
   .stats-detail-mins{ font-size:12px; color: var(--ink-soft); }
   .stats-detail-memo{ font-size:12px; color: var(--ink-soft); margin-top:3px; white-space:pre-wrap; line-height:1.4; }
+  .stats-detail-row .photo-thumb{ margin-top:0; }
 
   .setup-banner{
     background:#FFF3E0; border:1.5px solid var(--yellow); border-radius:14px;
@@ -1440,6 +1442,7 @@ function renderStatsDetail(typeName){
   }
   rows.forEach(r=>{
     const [ry, rm, rd] = r.dateStr.split('-').map(Number);
+    const photoUrl = r.photoPath ? publicPhotoUrl(r.photoPath) : null;
     const row = document.createElement('div');
     row.className = 'stats-detail-row';
     row.innerHTML = `
@@ -1448,7 +1451,21 @@ function renderStatsDetail(typeName){
         <div class="stats-detail-mins">${r.minutes}분</div>
         ${r.memo ? `<div class="stats-detail-memo">📝 ${escapeHtml(r.memo)}</div>` : ''}
       </div>
+      ${photoUrl ? `<img class="photo-thumb" src="${photoUrl}" data-url="${photoUrl}">` : ''}
     `;
+    // Clicking the row jumps to that day's record panel; clicking the photo
+    // thumbnail instead opens it full-size, without also navigating away.
+    row.addEventListener('click', ()=>{
+      statsOverlay.classList.remove('open');
+      openPanel(r.dateStr);
+    });
+    const thumb = row.querySelector('.photo-thumb');
+    if(thumb){
+      thumb.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        openLightbox(photoUrl);
+      });
+    }
     statsList.appendChild(row);
   });
 }
