@@ -23,7 +23,7 @@
    새로운 테이블을 추가한다면, 그 테이블에도 같은 패턴(삭제 전 보관함 테이블 + 트리거)을 만들어줄 것.
 3. **위험한 SQL을 Supabase SQL Editor에서 실행하기 전에는 항상 앱의 "💾 데이터 백업" 버튼으로 먼저 JSON을 내려받아 둔다.** (또는 SQL Editor에서 `select * from play_entries;` / `select * from play_types;` 결과를 CSV로 export.)
 4. **Supabase 무료 플랜은 프로젝트가 일정 기간(보통 1주일) 동안 전혀 접속이 없으면 자동으로 일시정지(pause)될 수 있다.** 일시정지된 프로젝트는 Supabase 대시보드에서 재활성화(restore)하면 데이터는 그대로 남아있지만, 오래 방치하면(수개월) 완전 삭제될 수 있으니 앱을 가끔이라도(한 달에 한 번 이상) 열어주는 게 안전하다.
-5. RLS 정책은 지금 "anon key만 알면 읽기/쓰기/삭제 다 가능" 구조다. 새 기능을 추가하다가 실수로 `for delete using (true)` 같은 정책을 다른 테이블에도 무심코 복붙하지 않도록 주의 — 꼭 필요한 테이블에만 명시적으로 걸 것.
+5. RLS 정책은 이제 구글 로그인 + `allowed_users` 테이블 기반이다 (`is_allowed_user()` 함수로 체크). 새 테이블을 추가할 때 실수로 `using (true)` 같은 완전 개방 정책을 복붙하지 않도록 주의 — 반드시 `is_allowed_user()`를 조건에 넣을 것. `play-photos` Storage 버킷의 select 정책만 예외로 열려있는데, 버킷 자체가 public이라 정책을 걸어도 실질적 의미가 없기 때문 (경로를 모르면 어차피 못 봄).
 
 ## ⚠️ 중요: `supabase`라는 변수명을 쓰지 말 것
 

@@ -212,3 +212,87 @@ create policy "anyone can view play photos" on storage.objects
 drop policy if exists "anyone can delete play photos" on storage.objects;
 create policy "anyone can delete play photos" on storage.objects
   for delete using (bucket_id = 'play-photos');
+
+-- ============================================================
+-- 10) 구글 로그인 + 허용된 이메일만 접근 (Supabase Auth 연동)
+-- 이제부터는 anon key만으로는 아무것도 못 읽고/못 씁니다 — 반드시 이 목록에
+-- 있는 이메일로 구글 로그인해야만 데이터에 접근할 수 있어요.
+-- ============================================================
+
+create table if not exists allowed_users (
+  email text primary key,
+  created_at timestamptz not null default now()
+);
+
+insert into allowed_users (email) values
+  ('primaface3384@gmail.com'),
+  ('wltn5431@gmail.com')
+on conflict (email) do nothing;
+
+alter table allowed_users enable row level security;
+
+-- 로그인한 사람의 이메일이 허용 목록에 있는지 확인하는 함수.
+-- security definer로 만들어서, 이 함수 안에서의 조회는 allowed_users의 RLS
+-- 정책과 상관없이(우회해서) 항상 정확하게 동작합니다. (자기 자신을 참조하는
+-- 정책이 재귀적으로 얽히는 걸 방지하는 표준적인 방법입니다.)
+create or replace function is_allowed_user()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from allowed_users where email = auth.jwt() ->> 'email'
+  );
+$$;
+
+drop policy if exists "allowed users can read the allow-list" on allowed_users;
+create policy "allowed users can read the allow-list" on allowed_users
+  for select using (is_allowed_user());
+
+drop policy if exists "allowed users can invite others" on allowed_users;
+create policy "allowed users can invite others" on allowed_users
+  for insert with check (is_allowed_user());
+
+-- 허용된 사람만 남을 제거할 수 있고, 실수로 자기 자신은 못 지웁니다
+-- (혼자 로그아웃도 못 하는 상태가 되는 걸 방지).
+drop policy if exists "allowed users can remove others" on allowed_users;
+create policy "allowed users can remove others" on allowed_users
+  for delete using (is_allowed_user() and email <> (auth.jwt() ->> 'email'));
+
+-- 기존 "누구나(anon key만 있으면)" 정책을 걷어내고, 허용된 로그인 사용자만
+-- 되도록 다시 만듭니다.
+drop policy if exists "anyone can read entries" on play_entries;
+drop policy if exists "anyone can insert entries" on play_entries;
+drop policy if exists "anyone can update entries" on play_entries;
+drop policy if exists "anyone can delete entries" on play_entries;
+create policy "allowed users can read entries" on play_entries for select using (is_allowed_user());
+create policy "allowed users can insert entries" on play_entries for insert with check (is_allowed_user());
+create policy "allowed users can update entries" on play_entries for update using (is_allowed_user());
+create policy "allowed users can delete entries" on play_entries for delete using (is_allowed_user());
+
+drop policy if exists "anyone can read types" on play_types;
+drop policy if exists "anyone can insert types" on play_types;
+drop policy if exists "anyone can update types" on play_types;
+drop policy if exists "anyone can delete types" on play_types;
+create policy "allowed users can read types" on play_types for select using (is_allowed_user());
+create policy "allowed users can insert types" on play_types for insert with check (is_allowed_user());
+create policy "allowed users can update types" on play_types for update using (is_allowed_user());
+create policy "allowed users can delete types" on play_types for delete using (is_allowed_user());
+
+-- 사진 업로드/삭제도 허용된 사용자만. (⚠️ 버킷 자체는 public이라, 사진의
+-- 정확한 파일 경로를 아는 사람은 로그인 없이도 그 사진 한 장은 볼 수 있어요 —
+-- 다만 경로가 무작위 문자열이라 추측 불가능하고, 목록 조회/업로드/삭제는
+-- 로그인 없이는 막혀 있습니다.)
+drop policy if exists "anyone can upload play photos" on storage.objects;
+create policy "allowed users can upload play photos" on storage.objects
+  for insert with check (bucket_id = 'play-photos' and public.is_allowed_user());
+
+drop policy if exists "anyone can delete play photos" on storage.objects;
+create policy "allowed users can delete play photos" on storage.objects
+  for delete using (bucket_id = 'play-photos' and public.is_allowed_user());
+
+-- select 정책("anyone can view play photos")은 그대로 둡니다 — public 버킷은
+-- 어차피 /storage/v1/object/public/ 경로로 로그인 여부와 무관하게 서빙되기
+-- 때문에, 여기 정책을 막아도 실질적인 보안 효과가 없어요.
