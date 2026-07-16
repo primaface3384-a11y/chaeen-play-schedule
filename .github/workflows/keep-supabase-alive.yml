@@ -1,0 +1,25 @@
+name: Keep Supabase project alive
+
+# Supabase free-tier projects auto-pause after 7 days with no API activity.
+# This just pings the REST API on a schedule so that never happens — no
+# secrets needed since the anon key is already public in index.html by
+# design (see CLAUDE.md).
+
+on:
+  schedule:
+    # Twice a week (Mon & Thu, 03:00 UTC) — comfortable margin under the
+    # 7-day pause threshold even if one run fails or is skipped.
+    - cron: '0 3 * * 1,4'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          curl -sf \
+            "https://demwtdbnbhkjfztudqjo.supabase.co/rest/v1/play_types?select=id&limit=1" \
+            -H "apikey: sb_publishable_w5GFr-IgQzZ8WAChw5Atbg_BanhsY13" \
+            -H "Authorization: Bearer sb_publishable_w5GFr-IgQzZ8WAChw5Atbg_BanhsY13" \
+            -o /dev/null
