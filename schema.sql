@@ -296,3 +296,31 @@ create policy "allowed users can delete play photos" on storage.objects
 -- select 정책("anyone can view play photos")은 그대로 둡니다 — public 버킷은
 -- 어차피 /storage/v1/object/public/ 경로로 로그인 여부와 무관하게 서빙되기
 -- 때문에, 여기 정책을 막아도 실질적인 보안 효과가 없어요.
+
+-- ============================================================
+-- 11) 아이 정보(이름/생년월일) — 달력 위 개월수 표시 + 개월수별 놀이 가이드에 사용
+-- 한 명의 아이 정보만 저장하는 1행짜리 테이블입니다 (id는 항상 1).
+-- ============================================================
+create table if not exists child_info (
+  id integer primary key default 1,
+  name text,
+  birth_date date,
+  updated_at timestamptz not null default now(),
+  constraint child_info_single_row check (id = 1)
+);
+
+alter table child_info enable row level security;
+
+drop policy if exists "allowed users can read child info" on child_info;
+create policy "allowed users can read child info" on child_info for select using (is_allowed_user());
+drop policy if exists "allowed users can insert child info" on child_info;
+create policy "allowed users can insert child info" on child_info for insert with check (is_allowed_user());
+drop policy if exists "allowed users can update child info" on child_info;
+create policy "allowed users can update child info" on child_info for update using (is_allowed_user());
+
+-- 이미 publication에 들어있으면 에러 없이 건너뜁니다 (재실행 안전).
+do $$
+begin
+  alter publication supabase_realtime add table child_info;
+exception when duplicate_object then null;
+end $$;
