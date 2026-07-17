@@ -356,6 +356,18 @@
   .access-email-row{ display:flex; align-items:center; gap:10px; background: var(--bg); border-radius:12px; padding:10px 12px; }
   .access-email-row .email{ flex:1; font-size:13px; }
   .access-email-row .you-tag{ color: var(--ink-soft); font-size:12px; }
+
+  .age-banner{
+    text-align:center; font-size:13px; color: var(--ink); background: var(--paper);
+    border-radius:12px; padding:9px 12px; margin-bottom:12px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:6px;
+    box-shadow: 0 1px 5px rgba(46,59,54,0.05);
+  }
+  .age-banner:hover{ background:#F4EEFB; }
+  .age-banner .arrow{ color: var(--ink-soft); font-size:12px; }
+  .age-guide-summary{ font-family:'Gaegu',cursive; font-size:18px; margin: 4px 0 14px; text-align:center; }
+  .guide-item{ font-size:13px; color: var(--ink); background: var(--bg); border-radius:10px; padding:9px 12px; margin-bottom:6px; }
+  .guide-disclaimer{ font-size:11px; color: var(--ink-soft); margin: -6px 0 14px; line-height:1.5; }
 </style>
 </head>
 <body>
@@ -383,6 +395,10 @@
     <h1><span class="name">채은이</span>의 놀이 스케줄러</h1>
     <p>오늘은 무슨 놀이를 했을까? 🧸</p>
   </header>
+  <div class="age-banner" id="ageBanner">
+    <span id="ageBannerText">👶 아이 정보를 입력해주세요</span>
+    <span class="arrow">›</span>
+  </div>
   <div class="sync-status"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">연결 중...</span></div>
   <div class="top-signout"><button id="signOutBtn">로그아웃 (<span id="currentUserEmail"></span>)</button></div>
 
@@ -414,6 +430,7 @@
     <button class="edit-types-link" id="statsBtn">📊 통계</button>
     <button class="edit-types-link" id="exportBtn">💾 데이터 백업</button>
     <button class="edit-types-link" id="accessBtn">👪 접근 관리</button>
+    <button class="edit-types-link" id="childInfoBtn">👶 아이 정보</button>
   </div>
 </div>
 
@@ -516,6 +533,33 @@
   </div>
 </div>
 
+<div class="overlay" id="childInfoOverlay">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>👶 아이 정보</h2>
+      <button class="close" id="closeChildInfoBtn">✕</button>
+    </div>
+
+    <span class="label">이름</span>
+    <div class="custom-type-row">
+      <input type="text" id="childNameInput" placeholder="예: 채은이">
+    </div>
+
+    <span class="label">생년월일</span>
+    <div class="custom-type-row">
+      <input type="date" id="childBirthInput">
+    </div>
+
+    <button class="add-btn" id="saveChildInfoBtn">저장</button>
+
+    <div id="ageGuideSection" style="display:none; margin-top:20px;">
+      <div class="age-guide-summary" id="ageGuideSummary"></div>
+      <div class="guide-disclaimer">이 시기에 흔히 추천되는 놀이·교육 참고용 목록이에요. 아이마다 발달 속도가 다르니 참고만 해주시고, 걱정되는 부분이 있으면 소아과 등 전문가와 상담해주세요.</div>
+      <div id="ageGuideList"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ============================================================
 // ⚙️ 설정: Supabase 프로젝트 URL과 anon key를 여기에 넣어주세요.
@@ -597,10 +641,19 @@ const accessOverlay = document.getElementById('accessOverlay');
 const accessList = document.getElementById('accessList');
 const newAllowedEmailInput = document.getElementById('newAllowedEmailInput');
 const inviteBtn = document.getElementById('inviteBtn');
+const ageBanner = document.getElementById('ageBanner');
+const ageBannerText = document.getElementById('ageBannerText');
+const childInfoOverlay = document.getElementById('childInfoOverlay');
+const childNameInput = document.getElementById('childNameInput');
+const childBirthInput = document.getElementById('childBirthInput');
+const ageGuideSection = document.getElementById('ageGuideSection');
+const ageGuideSummary = document.getElementById('ageGuideSummary');
+const ageGuideList = document.getElementById('ageGuideList');
 
 let currentUser = null;   // { email } once logged in AND allowed
 let allowedEmails = [];
 let appStarted = false;   // guards against re-subscribing to realtime on repeated auth events
+let childInfo = null;     // { name, birthDate } once set
 
 function setSyncStatus(state, detail){
   // state: 'on' | 'off' | 'busy'
@@ -846,6 +899,125 @@ async function deleteTypeRow(name){
   if(error) throw error;
 }
 
+// ---------- Age-based play guide ----------
+// General reference info (informed by commonly-cited early-childhood
+// development guidance) — not medical advice, every child's pace differs.
+const AGE_GUIDE = [
+  { max: 3, label: '0~3개월', items: ['얼굴 마주보고 웃어주기', '딸랑이 소리 들려주기', '엎드려 놀기(터미타임)', '흑백/고대비 그림 보여주기'] },
+  { max: 6, label: '4~6개월', items: ['잡기 놀이(딸랑이 흔들기)', '거울 보여주기', '다양한 촉감 장난감 만져보기', '배밀이 유도해보기'] },
+  { max: 9, label: '7~9개월', items: ['까꿍놀이', '블록 부딪혀 소리내기', '숨긴 물건 찾기', '잡고 서기 연습'] },
+  { max: 12, label: '10~12개월', items: ['잡고 걷기 연습', '컵 쌓기', '그림책 보며 손가락으로 가리키기', '빠이빠이 같은 간단한 동작 따라하기'] },
+  { max: 18, label: '13~18개월', items: ['크레용으로 낙서하기', '간단한 퍼즐 맞추기', '소꿉놀이 시작해보기', '계단 오르내리기 연습'] },
+  { max: 24, label: '19~24개월', items: ['블록 쌓기', '색깔·모양 구분 놀이', '인형 역할놀이', '짧은 그림책 읽어주기'] },
+  { max: 36, label: '25~36개월', items: ['역할놀이 확장하기(소꿉놀이)', '색칠하기', '6~12피스 퍼즐', '공 굴리기·차기 같은 신체놀이'] },
+  { max: 48, label: '37~48개월', items: ['가위질 연습', '숫자·글자에 관심 갖는 놀이', '친구와 함께하는 놀이', '창의적으로 그림 그리기'] },
+  { max: 60, label: '49~60개월', items: ['좀 더 복잡한 퍼즐·보드게임', '한글/알파벳 놀이로 익히기', '줄넘기 같은 균형감각 놀이', '이야기 만들어 말해보기'] },
+  { max: 72, label: '61~72개월', items: ['읽기·쓰기를 놀이로 연습', '규칙 있는 보드게임', '간단한 과학 실험 놀이', '악기·취미 활동 시작해보기'] }
+];
+
+function getAgeGuide(months){
+  return AGE_GUIDE.find(g => months <= g.max) || AGE_GUIDE[AGE_GUIDE.length - 1];
+}
+
+function monthsBetween(from, to){
+  let months = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
+  if(to.getDate() < from.getDate()) months--;
+  return Math.max(0, months);
+}
+
+// Age is shown as of "today" while viewing the current month, or as of the
+// 15th of whichever month is being browsed — so paging back to when the
+// child was younger shows a representative age for that period.
+function ageReferenceDate(){
+  const now = new Date();
+  if(current.getFullYear() === now.getFullYear() && current.getMonth() === now.getMonth()) return now;
+  return new Date(current.getFullYear(), current.getMonth(), 15);
+}
+
+function currentAgeMonths(){
+  if(!childInfo || !childInfo.birthDate) return null;
+  const birth = new Date(childInfo.birthDate + 'T00:00:00');
+  return monthsBetween(birth, ageReferenceDate());
+}
+
+function renderAgeBanner(){
+  const months = currentAgeMonths();
+  if(months === null){
+    ageBannerText.textContent = '👶 아이 정보를 입력해주세요';
+    return;
+  }
+  const name = (childInfo.name || '').trim() || '아이';
+  ageBannerText.textContent = `👶 ${name} ${months}개월`;
+}
+
+function renderAgeGuideSection(){
+  const months = currentAgeMonths();
+  if(months === null){
+    ageGuideSection.style.display = 'none';
+    return;
+  }
+  const guide = getAgeGuide(months);
+  const name = (childInfo.name || '').trim() || '아이';
+  ageGuideSummary.textContent = `${name} · ${months}개월 (${guide.label} 추천)`;
+  ageGuideList.innerHTML = '';
+  guide.items.forEach(item=>{
+    const row = document.createElement('div');
+    row.className = 'guide-item';
+    row.textContent = '• ' + item;
+    ageGuideList.appendChild(row);
+  });
+  ageGuideSection.style.display = 'block';
+}
+
+async function fetchChildInfo(){
+  const { data, error } = await sb.from('child_info').select('*').eq('id', 1).maybeSingle();
+  if(error){ console.error('아이 정보 로드 오류', error); return; }
+  childInfo = data ? { name: data.name, birthDate: data.birth_date } : null;
+  renderAgeBanner();
+}
+
+ageBanner.addEventListener('click', ()=>{
+  childNameInput.value = childInfo ? (childInfo.name || '') : '';
+  childBirthInput.value = childInfo ? (childInfo.birthDate || '') : '';
+  renderAgeGuideSection();
+  childInfoOverlay.classList.add('open');
+});
+document.getElementById('childInfoBtn').addEventListener('click', ()=>{
+  childNameInput.value = childInfo ? (childInfo.name || '') : '';
+  childBirthInput.value = childInfo ? (childInfo.birthDate || '') : '';
+  renderAgeGuideSection();
+  childInfoOverlay.classList.add('open');
+});
+document.getElementById('closeChildInfoBtn').addEventListener('click', ()=> childInfoOverlay.classList.remove('open'));
+childInfoOverlay.addEventListener('click', (e)=>{ if(e.target===childInfoOverlay) childInfoOverlay.classList.remove('open'); });
+
+document.getElementById('saveChildInfoBtn').addEventListener('click', async ()=>{
+  const name = childNameInput.value.trim();
+  const birthDate = childBirthInput.value;
+  if(!birthDate){
+    alert('생년월일을 입력해주세요.');
+    return;
+  }
+  const btn = document.getElementById('saveChildInfoBtn');
+  btn.disabled = true;
+  btn.textContent = '저장 중...';
+  try{
+    const { error } = await sb.from('child_info').upsert({
+      id: 1, name: name || null, birth_date: birthDate, updated_at: new Date().toISOString()
+    });
+    if(error) throw error;
+    childInfo = { name, birthDate };
+    renderAgeBanner();
+    renderAgeGuideSection();
+  }catch(e){
+    console.error('아이 정보 저장 오류', e);
+    alert('저장에 실패했어요. 인터넷 연결을 확인해주세요.');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '저장';
+  }
+});
+
 // ---------- Rendering (same as before) ----------
 function fmtDate(y,m,d){
   return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -864,6 +1036,7 @@ function renderCalendar(){
   const y = current.getFullYear();
   const m = current.getMonth();
   monthLabel.textContent = `${y}년 ${m+1}월`;
+  renderAgeBanner();
   grid.innerHTML = '';
 
   const firstDay = new Date(y, m, 1).getDay();
@@ -1701,6 +1874,7 @@ accessOverlay.addEventListener('click', (e)=>{ if(e.target===accessOverlay) acce
 async function startApp(){
   setSyncStatus('busy');
   await refreshAndRender();
+  await fetchChildInfo();
 
   sb
     .channel('play_entries_changes')
@@ -1710,6 +1884,11 @@ async function startApp(){
   sb
     .channel('play_types_changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'play_types' }, ()=> refreshAndRender())
+    .subscribe();
+
+  sb
+    .channel('child_info_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'child_info' }, ()=> fetchChildInfo())
     .subscribe();
 }
 
