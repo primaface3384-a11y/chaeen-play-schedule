@@ -25,6 +25,30 @@
 4. **Supabase 무료 플랜은 프로젝트가 일정 기간(보통 1주일) 동안 전혀 접속이 없으면 자동으로 일시정지(pause)될 수 있다.** 일시정지된 프로젝트는 Supabase 대시보드에서 재활성화(restore)하면 데이터는 그대로 남아있지만, 오래 방치하면(수개월) 완전 삭제될 수 있으니 앱을 가끔이라도(한 달에 한 번 이상) 열어주는 게 안전하다.
 5. RLS 정책은 이제 구글 로그인 + `allowed_users` 테이블 기반이다 (`is_allowed_user()` 함수로 체크). 새 테이블을 추가할 때 실수로 `using (true)` 같은 완전 개방 정책을 복붙하지 않도록 주의 — 반드시 `is_allowed_user()`를 조건에 넣을 것. `play-photos` Storage 버킷의 select 정책만 예외로 열려있는데, 버킷 자체가 public이라 정책을 걸어도 실질적 의미가 없기 때문 (경로를 모르면 어차피 못 봄).
 
+## 🔐 구글 로그인(OAuth) 설정
+
+이 앱은 Supabase Auth + Google OAuth로 로그인하고, `allowed_users` 테이블에 등록된 이메일만 데이터에 접근할 수 있다 (자세한 SQL은 `schema.sql` 10번 섹션 참고). 이미 설정 완료된 상태지만, Client Secret을 다시 발급하거나 새 환경에서 재설정해야 할 때를 위해 값들을 남겨둔다.
+
+- **Supabase 프로젝트 ref**: `demwtdbnbhkjfztudqjo`
+- **Google OAuth의 Authorized redirect URI** (Supabase 콜백 주소, 고정값):
+  ```
+  https://demwtdbnbhkjfztudqjo.supabase.co/auth/v1/callback
+  ```
+- **Google OAuth의 Authorized JavaScript origin**:
+  ```
+  https://primaface3384-a11y.github.io
+  ```
+- **Google Cloud Console**: [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials) → OAuth 2.0 Client ID는 "Web application" 타입이어야 함. Client ID/Secret은 Supabase 대시보드 → Authentication → Providers → Google 에 등록.
+- **접근 허용 이메일 관리**: SQL로 직접 안 건드려도 됨 — 로그인 후 앱 안의 **"👪 접근 관리"** 화면에서 허용된 사용자가 직접 초대/제거 가능 (`allowed_users` 테이블, RLS로 이미 허용된 사용자만 추가/삭제 가능하도록 되어 있음).
+
+### 겪었던 에러: `Unable to exchange external code` (500 error)
+
+구글 로그인 창은 정상적으로 뜨고 로그인도 성공하는데, Supabase로 돌아온 직후 URL에 `?error=server_error&error_code=unexpected_failure&error_description=Unable+to+exchange+external+code...`가 붙으면서 다시 로그인 화면으로 튕기는 증상이 있었다.
+
+- **원인**: 구글 로그인 자체(Google → Supabase 콜백)는 성공했지만, Supabase 서버가 그 인증 코드를 access token으로 교환하는 마지막 단계(Google 토큰 엔드포인트 호출, Client Secret 필요)에서 실패한 것 — 거의 항상 **Supabase 대시보드에 등록된 Client Secret(또는 Client ID)이 복사-붙여넣기 과정에서 손상**됐기 때문 (앞뒤 공백, 줄바꿈이 같이 복사되는 경우가 흔함).
+- **해결**: Google Cloud Console → Credentials → 해당 OAuth Client → "ADD SECRET"으로 새 Secret 발급 → **복사 아이콘(📋)으로만 복사** (드래그 선택 금지) → Supabase Providers → Google 설정에서 Client ID/Secret 칸을 **전체 삭제 후 다시 붙여넣기** → Save. 이 방법으로 해결됨.
+- 이 프로젝트에서는 이렇게 해결했다: Secret 재발급만으로 해결, OAuth 클라이언트 자체를 새로 만들 필요는 없었음.
+
 ## ⚠️ 중요: `supabase`라는 변수명을 쓰지 말 것
 
 `index.html`은 아래 스크립트를 `<head>`에서 불러온다:
