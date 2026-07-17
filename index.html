@@ -36,7 +36,7 @@
   }
   .wrap{ max-width: 640px; margin: 0 auto; }
 
-  header.top{ text-align:center; margin-bottom: 10px; }
+  header.top{ position:relative; text-align:center; margin-bottom: 10px; }
   header.top h1{
     font-family: 'Gaegu', cursive;
     font-size: 34px;
@@ -46,6 +46,20 @@
   }
   header.top h1 .name{ color: var(--coral); }
   header.top p{ margin:0; font-size:13px; color: var(--ink-soft); }
+  .settings-btn{
+    position:absolute; top:0; right:0; border:none; background: var(--paper); color: var(--ink-soft);
+    width:36px; height:36px; border-radius:50%; font-size:17px; cursor:pointer;
+    box-shadow: 0 1px 5px rgba(46,59,54,0.06);
+  }
+  .settings-btn:hover{ background: var(--bg); color: var(--ink); }
+  .settings-menu{ display:flex; flex-direction:column; gap:10px; }
+  .settings-menu-item{
+    text-align:left; border:1.5px solid var(--line); background: var(--paper); color: var(--ink);
+    border-radius:12px; padding:14px 16px; font-size:14px; cursor:pointer; font-family:'Gowun Dodum',sans-serif;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .settings-menu-item:hover{ background: var(--bg); }
+  .settings-menu-item .arrow{ color: var(--ink-soft); }
 
   .sync-status{
     text-align:center; font-size:11px; color: var(--ink-soft);
@@ -392,7 +406,8 @@
 
 <div class="wrap" id="appWrap" style="display:none;">
   <header class="top">
-    <h1><span class="name">채은이</span>의 놀이 스케줄러</h1>
+    <button class="settings-btn" id="settingsBtn" title="설정">⚙️</button>
+    <h1><span class="name" id="mainTitleName">채은이</span>의 놀이 스케줄러</h1>
     <p>오늘은 무슨 놀이를 했을까? 🧸</p>
   </header>
   <div class="age-banner" id="ageBanner">
@@ -429,8 +444,6 @@
     <button class="edit-types-link" id="editTypesBtn">🖍️ 놀이 종류 편집</button>
     <button class="edit-types-link" id="statsBtn">📊 통계</button>
     <button class="edit-types-link" id="exportBtn">💾 데이터 백업</button>
-    <button class="edit-types-link" id="accessBtn">👪 접근 관리</button>
-    <button class="edit-types-link" id="childInfoBtn">👶 아이 정보</button>
   </div>
 </div>
 
@@ -560,6 +573,19 @@
   </div>
 </div>
 
+<div class="overlay" id="settingsOverlay">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>⚙️ 설정</h2>
+      <button class="close" id="closeSettingsBtn">✕</button>
+    </div>
+    <div class="settings-menu">
+      <button class="settings-menu-item" id="openChildInfoFromSettingsBtn">👶 아기 정보 <span class="arrow">›</span></button>
+      <button class="settings-menu-item" id="openAccessFromSettingsBtn">👪 접근 관리 <span class="arrow">›</span></button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ============================================================
 // ⚙️ 설정: Supabase 프로젝트 URL과 anon key를 여기에 넣어주세요.
@@ -649,6 +675,8 @@ const childBirthInput = document.getElementById('childBirthInput');
 const ageGuideSection = document.getElementById('ageGuideSection');
 const ageGuideSummary = document.getElementById('ageGuideSummary');
 const ageGuideList = document.getElementById('ageGuideList');
+const settingsOverlay = document.getElementById('settingsOverlay');
+const mainTitleName = document.getElementById('mainTitleName');
 
 let currentUser = null;   // { email } once logged in AND allowed
 let allowedEmails = [];
@@ -941,12 +969,15 @@ function currentAgeMonths(){
 }
 
 function renderAgeBanner(){
+  const configuredName = childInfo && childInfo.name && childInfo.name.trim();
+  mainTitleName.textContent = configuredName || '채은이';
+
   const months = currentAgeMonths();
   if(months === null){
     ageBannerText.textContent = '👶 아이 정보를 입력해주세요';
     return;
   }
-  const name = (childInfo.name || '').trim() || '아이';
+  const name = configuredName || '아이';
   ageBannerText.textContent = `👶 ${name} ${months}개월`;
 }
 
@@ -976,18 +1007,13 @@ async function fetchChildInfo(){
   renderAgeBanner();
 }
 
-ageBanner.addEventListener('click', ()=>{
+function openChildInfoOverlay(){
   childNameInput.value = childInfo ? (childInfo.name || '') : '';
   childBirthInput.value = childInfo ? (childInfo.birthDate || '') : '';
   renderAgeGuideSection();
   childInfoOverlay.classList.add('open');
-});
-document.getElementById('childInfoBtn').addEventListener('click', ()=>{
-  childNameInput.value = childInfo ? (childInfo.name || '') : '';
-  childBirthInput.value = childInfo ? (childInfo.birthDate || '') : '';
-  renderAgeGuideSection();
-  childInfoOverlay.classList.add('open');
-});
+}
+ageBanner.addEventListener('click', openChildInfoOverlay);
 document.getElementById('closeChildInfoBtn').addEventListener('click', ()=> childInfoOverlay.classList.remove('open'));
 childInfoOverlay.addEventListener('click', (e)=>{ if(e.target===childInfoOverlay) childInfoOverlay.classList.remove('open'); });
 
@@ -1863,12 +1889,28 @@ inviteBtn.addEventListener('click', async ()=>{
   }
 });
 
-document.getElementById('accessBtn').addEventListener('click', ()=>{
+function openAccessOverlay(){
   renderAccessList();
   accessOverlay.classList.add('open');
-});
+}
 document.getElementById('closeAccessBtn').addEventListener('click', ()=> accessOverlay.classList.remove('open'));
 accessOverlay.addEventListener('click', (e)=>{ if(e.target===accessOverlay) accessOverlay.classList.remove('open'); });
+
+// ---------- Settings menu ----------
+document.getElementById('settingsBtn').addEventListener('click', ()=>{
+  settingsOverlay.classList.add('open');
+});
+document.getElementById('closeSettingsBtn').addEventListener('click', ()=> settingsOverlay.classList.remove('open'));
+settingsOverlay.addEventListener('click', (e)=>{ if(e.target===settingsOverlay) settingsOverlay.classList.remove('open'); });
+
+document.getElementById('openChildInfoFromSettingsBtn').addEventListener('click', ()=>{
+  settingsOverlay.classList.remove('open');
+  openChildInfoOverlay();
+});
+document.getElementById('openAccessFromSettingsBtn').addEventListener('click', ()=>{
+  settingsOverlay.classList.remove('open');
+  openAccessOverlay();
+});
 
 // ---------- Init + realtime subscriptions ----------
 async function startApp(){
