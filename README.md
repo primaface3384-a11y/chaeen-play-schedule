@@ -81,10 +81,43 @@ git push -u origin main
 
 ---
 
+## 자동 백업 설정 (한 번만, 5분)
+
+`.github/workflows/backup-data.yml`이 일주일에 두 번 모든 데이터와 사진을 받아
+**암호화해서** 이 저장소의 `backup/` 폴더에 커밋합니다. Supabase 프로젝트가
+일시정지되거나 삭제되어도 기록은 git에 남습니다.
+
+이 저장소는 **공개(public)** 라서 (무료 플랜 GitHub Pages 요구사항) 백업은 반드시
+암호화됩니다. 그래서 아래 두 개의 시크릿이 필요합니다:
+
+**Settings → Secrets and variables → Actions → New repository secret**
+
+| 이름 | 값 |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → `service_role` 키. RLS를 우회해야 데이터를 읽을 수 있어서 필요해요 (공개된 anon key로는 빈 배열만 나옵니다). |
+| `BACKUP_PASSPHRASE` | 직접 정하는 긴 암호. **이걸 잃어버리면 백업을 복호화할 수 없으니** 비밀번호 관리자 등 안전한 곳에 보관하세요. |
+
+둘 다 넣은 뒤 Actions 탭 → "Backup Supabase data" → **Run workflow**로 한 번
+수동 실행해 확인하세요. 시크릿이 없으면 워크플로는 경고만 남기고 조용히 넘어갑니다.
+
+**복원 방법:**
+
+```bash
+gpg --batch --pinentry-mode loopback --passphrase '<BACKUP_PASSPHRASE>' \
+  -d backup/data.json.gpg > data.json
+gpg --batch --pinentry-mode loopback --passphrase '<BACKUP_PASSPHRASE>' \
+  -d backup/photos/<파일명>.jpg.gpg > photo.jpg
+```
+
+> ⚠️ 복호화한 파일은 **절대 커밋하지 마세요.** 공개 저장소라 그대로 노출됩니다.
+
 ## 파일 구성
 
 - `index.html` — 실제 웹앱 (이것만 GitHub Pages로 배포하면 됨)
 - `schema.sql` — Supabase에 한 번 실행할 테이블 생성 스크립트
+- `.github/workflows/backup-data.yml` — 암호화 자동 백업 (위 "자동 백업 설정" 참고)
+- `.github/workflows/keep-supabase-alive.yml` — 일시정지 방지 핑 + 실패 시 이슈 알림
+- `.github/scripts/fetch_backup.py` — 백업 워크플로가 쓰는 데이터/사진 수집 스크립트
 - `README.md` — 이 안내 문서
 
 ## 참고사항

@@ -1,0 +1,98 @@
+name: Backup Supabase data
+
+# Pulls every row (and every photo) out of Supabase and commits it to this
+# repo, so the family's records survive even if the Supabase project is
+# paused, deleted, or lost. This — not keep-supabase-alive.yml — is the real
+# safety net.
+#
+# ⚠️ This repository is PUBLIC (GitHub Pages on the free plan requires it),
+# so the backup is encrypted before being committed. Plaintext would put the
+# child's name, birth date, daily logs, memos, photos and the family's email
+# addresses on the open internet, which is exactly what the Google-login gate
+# exists to prevent. Never commit the decrypted files.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_SERVICE_ROLE_KEY  — Supabase → Project Settings → API → service_role.
+#                                Needed because RLS (is_allowed_user()) makes the
+#                                public anon key return zero rows.
+#   BACKUP_PASSPHRASE          — any long passphrase you keep somewhere safe.
+#                                Without it the backup CANNOT be decrypted.
+#
+# To restore:
+#   gpg --batch --pinentry-mode loopback --passphrase '<BACKUP_PASSPHRASE>' -d backup/data.json.gpg > data.json
+#   gpg --batch --pinentry-mode loopback --passphrase '<BACKUP_PASSPHRASE>' -d backup/photos/<name>.jpg.gpg > photo.jpg
+
+on:
+  schedule:
+    - cron: '0 4 * * 1,4'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the secrets are configured
+        id: guard
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$SERVICE_KEY" ] || [ -z "$PASSPHRASE" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SUPABASE_SERVICE_ROLE_KEY / BACKUP_PASSPHRASE 가 설정되지 않아 백업을 건너뜁니다. README의 '자동 백업 설정'을 참고하세요."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch data and photos
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: https://demwtdbnbhkjfztudqjo.supabase.co
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 .github/scripts/fetch_backup.py
+
+      - name: Encrypt
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          mkdir -p backup/photos
+
+          gpg --batch --yes --quiet --pinentry-mode loopback --passphrase "$PASSPHRASE" \
+            --symmetric --cipher-algo AES256 \
+            -o backup/data.json.gpg _staging/data.json
+
+          # Photos are encrypted once and never re-encrypted, so each one is a
+          # single permanent blob in git history rather than a fresh copy per run.
+          shopt -s nullglob
+          for f in _staging/photos/*; do
+            name=$(basename "$f")
+            if [ ! -f "backup/photos/$name.gpg" ]; then
+              gpg --batch --yes --quiet --pinentry-mode loopback --passphrase "$PASSPHRASE" \
+                --symmetric --cipher-algo AES256 \
+                -o "backup/photos/$name.gpg" "$f"
+            fi
+          done
+
+          rm -rf _staging
+
+      - name: Commit the backup
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "backup-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backup
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: encrypted data backup"
+            git pull --rebase --autostash origin main
+            git push
+          else
+            echo "변경 사항 없음 — 커밋 생략."
+          fi
