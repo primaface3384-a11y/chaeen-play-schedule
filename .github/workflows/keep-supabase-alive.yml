@@ -1,26 +1,28 @@
 name: Keep Supabase project alive
 
-# Supabase free-tier projects auto-pause after 7 days with no API activity.
-# This pings the REST API on a schedule so that never happens — no secrets
-# needed since the anon key is already public in index.html by design (see
-# CLAUDE.md).
+# Supabase free-tier projects auto-pause after a stretch with no API activity.
+# This pings the REST API on a schedule to push that off — no secrets needed
+# since the anon key is already public in index.html by design (see CLAUDE.md).
 #
 # It also records the ping as a small commit. GitHub auto-disables scheduled
-# workflows after 60 days with no new commits to the repo, and neither
-# people just visiting the app nor this workflow's own runs count as a
-# "commit" by themselves — only an actual commit does. Committing the
-# timestamp closes that loop, so this stays alive indefinitely with zero
-# manual maintenance (no need to open the app or touch the code).
+# workflows after 60 days with no new commits to the repo, and neither people
+# just visiting the app nor this workflow's own runs count as a "commit" by
+# themselves — only an actual commit does. Committing the timestamp closes
+# that loop, so this stays alive indefinitely with zero manual maintenance.
+#
+# ⚠️ This ping is best-effort, NOT a guarantee. In Aug 2026 the project was
+# paused only 3 days after a successful ping, so treat the automated backup
+# (backup-data.yml) as the real safety net — not this file.
 
 on:
   schedule:
-    # Twice a week (Mon & Thu, 03:00 UTC) — comfortable margin under both
-    # Supabase's 7-day pause threshold and GitHub's 60-day disable threshold.
+    # Twice a week (Mon & Thu, 03:00 UTC).
     - cron: '0 3 * * 1,4'
   workflow_dispatch: {}
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   ping:
@@ -29,14 +31,38 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Ping Supabase REST API
+        id: ping
+        # Deliberately does not abort the job on failure: the commit step below
+        # still needs to run so GitHub's 60-day clock keeps getting reset even
+        # while Supabase is down, and the alert step needs to know what broke.
+        continue-on-error: true
         run: |
-          curl -sf \
+          set +e
+          body=$(curl -sS --max-time 30 -w '\n%{http_code}' \
             "https://demwtdbnbhkjfztudqjo.supabase.co/rest/v1/play_types?select=id&limit=1" \
             -H "apikey: sb_publishable_w5GFr-IgQzZ8WAChw5Atbg_BanhsY13" \
-            -H "Authorization: Bearer sb_publishable_w5GFr-IgQzZ8WAChw5Atbg_BanhsY13" \
-            -o /dev/null
+            -H "Authorization: Bearer sb_publishable_w5GFr-IgQzZ8WAChw5Atbg_BanhsY13" 2>&1)
+          curl_exit=$?
+          status=$(printf '%s' "$body" | tail -n1)
+          echo "curl_exit=$curl_exit" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+          if [ "$curl_exit" -ne 0 ]; then
+            # 6 = couldn't resolve host, which is what a paused project looks like.
+            echo "reason=curl exit $curl_exit (6 = couldn't resolve host → project likely paused)" >> "$GITHUB_OUTPUT"
+            echo "::error::Supabase ping failed: curl exit $curl_exit"
+            exit 1
+          fi
+          if [ "$status" != "200" ]; then
+            echo "reason=HTTP $status from the REST API" >> "$GITHUB_OUTPUT"
+            echo "::error::Supabase ping returned HTTP $status"
+            exit 1
+          fi
+          echo "Supabase responded HTTP 200."
 
       - name: Record ping (keeps this workflow from being auto-disabled after 60 days)
+        # always() so the 60-day clock is reset even when the ping above failed.
+        if: always()
         run: |
           mkdir -p .github
           date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/last-keepalive-ping.txt
@@ -45,5 +71,56 @@ jobs:
           git add .github/last-keepalive-ping.txt
           if ! git diff --cached --quiet; then
             git commit -m "chore: keepalive ping"
+            git pull --rebase --autostash origin main
             git push
           fi
+
+      - name: Open an alert issue if the ping failed
+        if: steps.ping.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ steps.ping.outputs.reason }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # One rolling issue instead of a new one every run — reopen and
+          # comment if it already exists, so the inbox doesn't get flooded.
+          existing=$(gh issue list --label supabase-down --state open \
+            --json number --jq '.[0].number')
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body \
+              "여전히 연결되지 않습니다 — $REASON
+
+              [실행 로그]($RUN_URL) · $(date -u +'%Y-%m-%d %H:%M UTC')"
+          else
+            gh label create supabase-down --color B60205 \
+              --description "Supabase 백엔드에 연결되지 않음" 2>/dev/null || true
+            gh issue create --label supabase-down \
+              --title "🚨 Supabase에 연결되지 않습니다" \
+              --body "keepalive 핑이 실패했습니다.
+
+              **원인**: $REASON
+
+              앱(https://primaface3384-a11y.github.io/chaeen-play-schedule/)이
+              열리지 않을 수 있습니다.
+
+              ### 확인할 것
+              1. https://supabase.com/dashboard 에서 프로젝트 \`demwtdbnbhkjfztudqjo\` 상태 확인
+              2. \"Paused\" 라면 **Restore** 클릭 (데이터는 그대로 보존됩니다)
+              3. 복구되면 이 이슈는 다음 실행 때 자동으로 닫힙니다
+
+              [실행 로그]($RUN_URL)"
+          fi
+
+      - name: Close the alert issue once it recovers
+        if: steps.ping.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list --label supabase-down --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "✅ Supabase 연결이 정상으로 돌아왔습니다."
+          done
+
+      - name: Fail the run if the ping failed
+        if: steps.ping.outcome == 'failure'
+        run: exit 1

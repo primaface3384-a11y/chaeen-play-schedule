@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+
+# Backup staging — holds DECRYPTED data and photos. This repo is public, so
+# these must never be committed (see CLAUDE.md safety rule 5).
+_staging/
+*.json.decrypted
+data.json

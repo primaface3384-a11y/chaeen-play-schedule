@@ -363,6 +363,16 @@
     cursor:pointer; font-family:'Gowun Dodum',sans-serif; margin-top:16px;
   }
   .signout-link:hover{ color: var(--ink); }
+  .retry-btn{
+    border:1.5px solid var(--line); background: var(--paper); color: var(--ink);
+    border-radius:12px; padding:11px 22px; font-size:14px; cursor:pointer;
+    font-family:'Gowun Dodum',sans-serif; margin-top:4px;
+  }
+  .retry-btn:hover{ background: var(--bg); }
+  .retry-btn:disabled{ opacity:.6; cursor:default; }
+  .conn-error-detail{
+    font-size:11px; color: var(--ink-soft); margin-top:14px; word-break:break-word; line-height:1.5;
+  }
   .settings-menu-item.danger{ color:#C4544A; }
   .access-email-row{ display:flex; align-items:center; gap:10px; background: var(--bg); border-radius:12px; padding:10px 12px; }
   .access-email-row .email{ flex:1; font-size:13px; }
@@ -399,6 +409,18 @@
     <h1><span class="name">채은이</span>의 놀이 스케줄러</h1>
     <p><span class="auth-email" id="notAllowedEmail"></span> 계정은<br>아직 접근이 허용되지 않았어요.<br>가족 구성원에게 초대를 요청해주세요.</p>
     <button class="signout-link" id="signOutFromNotAllowedBtn">다른 계정으로 로그인</button>
+  </div>
+</div>
+
+<div class="auth-screen" id="connErrorScreen">
+  <div class="auth-card">
+    <h1>연결할 수 없어요 😢</h1>
+    <p>데이터 서버(Supabase)에 연결하지 못했어요.<br>
+      인터넷 연결을 확인해주세요.<br>
+      계속 이러면 Supabase 프로젝트가 일시정지된 것일 수 있어요
+      (대시보드에서 Restore를 눌러주세요).</p>
+    <button class="retry-btn" id="connRetryBtn">다시 시도</button>
+    <div class="conn-error-detail" id="connErrorDetail"></div>
   </div>
 </div>
 
@@ -663,6 +685,8 @@ const appWrap = document.getElementById('appWrap');
 const loginScreen = document.getElementById('loginScreen');
 const notAllowedScreen = document.getElementById('notAllowedScreen');
 const notAllowedEmail = document.getElementById('notAllowedEmail');
+const connErrorScreen = document.getElementById('connErrorScreen');
+const connErrorDetail = document.getElementById('connErrorDetail');
 const currentUserEmail = document.getElementById('currentUserEmail');
 const accessOverlay = document.getElementById('accessOverlay');
 const accessList = document.getElementById('accessList');
@@ -684,6 +708,7 @@ let currentUser = null;   // { email } once logged in AND allowed
 let allowedEmails = [];
 let appStarted = false;   // guards against re-subscribing to realtime on repeated auth events
 let childInfo = null;     // { name, birthDate } once set
+let backendReachable = true;  // flipped by the startup probe; gates the auth screens
 
 function setSyncStatus(state, detail){
   // state: 'on' | 'off' | 'busy'
@@ -1794,10 +1819,30 @@ document.getElementById('statsAllBtn').addEventListener('click', ()=>{
 
 // ---------- Auth gate ----------
 function showScreen(which){
-  // which: 'login' | 'notAllowed' | 'app'
+  // which: 'login' | 'notAllowed' | 'connError' | 'app'
   loginScreen.classList.toggle('show', which === 'login');
   notAllowedScreen.classList.toggle('show', which === 'notAllowed');
+  connErrorScreen.classList.toggle('show', which === 'connError');
   appWrap.style.display = which === 'app' ? '' : 'none';
+}
+
+// Every screen is hidden by default, so if the backend is unreachable and
+// nothing ever calls showScreen() the page just stays blank white — which is
+// exactly what happened when the Supabase project got paused. This makes the
+// failure visible instead.
+function showConnError(err){
+  backendReachable = false;
+  const detail = err && (err.message || String(err));
+  connErrorDetail.textContent = detail ? `(${detail})` : '';
+  showScreen('connError');
+}
+
+// A successful unauthenticated read returns an empty array (RLS filters the
+// rows out) with no error, so *any* error here means we genuinely could not
+// talk to the backend — bad network, paused project, or broken config.
+async function probeBackend(){
+  const { error } = await sb.from('play_types').select('id').limit(1);
+  if(error) throw error;
 }
 
 async function handleAuthChange(session){
@@ -1952,7 +1997,36 @@ if(!configured){
   renderCalendar();
 }else{
   sb.auth.onAuthStateChange((event, session)=>{
+    // Don't let a cached-session event paint the login screen over a
+    // connection error we've already detected — logging in would just
+    // redirect to a dead host.
+    if(!backendReachable) return;
     handleAuthChange(session).catch(e=> console.error('인증 처리 오류', e));
+  });
+
+  // Runs alongside the auth listener rather than blocking it, so a healthy
+  // load is never slowed down by the probe.
+  probeBackend().catch(e=>{
+    console.error('백엔드 연결 실패', e);
+    showConnError(e);
+  });
+
+  document.getElementById('connRetryBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('connRetryBtn');
+    btn.disabled = true;
+    btn.textContent = '확인 중...';
+    try{
+      await probeBackend();
+      backendReachable = true;
+      // Re-ask for the session now that the backend is answering again.
+      const { data } = await sb.auth.getSession();
+      await handleAuthChange(data ? data.session : null);
+    }catch(e){
+      showConnError(e);
+    }finally{
+      btn.disabled = false;
+      btn.textContent = '다시 시도';
+    }
   });
 }
 </script>
